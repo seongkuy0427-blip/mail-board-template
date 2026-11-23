@@ -1154,6 +1154,9 @@ def image_size(blob: bytes) -> tuple[int, int] | None:
             if blob[12:16] == b"VP8L":                       # 무손실 — 14비트씩
                 b = int.from_bytes(blob[21:25], "little")
                 return (b & 0x3FFF) + 1, ((b >> 14) & 0x3FFF) + 1
+            if blob[12:16] == b"VP8 " and blob[23:26] == b"\x9d\x01\x2a":   # 손실 — 시작코드 뒤 14비트
+                w, h = struct.unpack("<HH", blob[26:30])
+                return w & 0x3FFF, h & 0x3FFF
         if blob[:2] == b"\xff\xd8":
             i, n = 2, len(blob)
             while i + 9 < n:
