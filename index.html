@@ -2352,26 +2352,32 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   /* 정렬 기준 시각. 기본 ‘최신 수신순’은 행에 찍히는 받은 시각(receivedAt)을 그대로 쓴다.
      - lastAt은 스레드의 ‘마지막 활동’(내 회신 포함)이라 받은 시각과 다르다. 이걸 우선하면
        화면에 보이는 날짜 순서가 뒤죽박죽으로 보이므로 같은 시각일 때만 보조 기준으로 쓴다.
-     - 둘 다 "YYYY-MM-DD HH:MM" 형식이라 문자열 비교 = 시간 비교 */
-  function sortAt(it) { return it.receivedAt || it.lastAt || ""; }
+     - "YYYY-MM-DD HH:MM" 은 문자열 비교 = 시간 비교라서 그대로 localeCompare 로 비교한다.
+     - 빈 값이나 T 구분·점/슬래시 구분·초 이하가 섞여도 순서가 깨지지 않도록 한 번 다듬는다. */
+  function normAt(v) {
+    if (!v) return "";
+    const s = String(v).trim().replace("T", " ");
+    const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ ]+(\d{1,2}):(\d{2}))?/);
+    if (!m) return s;
+    const p2 = (n) => ("0" + n).slice(-2);
+    return m[1] + "-" + p2(m[2]) + "-" + p2(m[3]) + " " + p2(m[4] || 0) + ":" + (m[5] || "00");
+  }
+  function sortAt(it) { return normAt(it.receivedAt) || normAt(it.lastAt) || ""; }
+  function timeDesc(a, b) {
+    /* 최신 받은 메일이 먼저 — 같은 시각이면 스레드 마지막 활동이 최근인 것 먼저 */
+    return sortAt(b).localeCompare(sortAt(a)) || normAt(b.lastAt).localeCompare(normAt(a.lastAt));
+  }
+  function dueAsc(a, b) {
+    return (dueOf(a) || "9999-99-99").localeCompare(dueOf(b) || "9999-99-99");
+  }
   function sortList(list) {
+    /* ‘최신 수신순’(기본)은 등급(1-1·1-2·1-3)과 상관없이 시간순으로만 정렬한다.
+       등급은 같은 시각일 때의 보조 기준일 뿐이고, 1-1 우선은 🔴 탭의 색·배지로 이미 드러난다. */
     list.sort((a, b) => {
-      const ra = rank(a), rb = rank(b);
-      if (ra !== rb) return ra - rb;   /* 🔴 1-1 → 1-2 → 1-3 등급이 먼저 */
-      if (view.sort === "recent") {
-        /* 기본값 — 같은 등급 안에서는 최신 받은 메일이 맨 위, 아래로 시간순 */
-        const ta = sortAt(a), tb = sortAt(b);
-        if (ta !== tb) return tb.localeCompare(ta);
-        const la = a.lastAt || "", lb = b.lastAt || "";
-        return la === lb ? 0 : lb.localeCompare(la);
-      }
-      if (view.sort === "deadline") {
-        const da = dueOf(a) || "9999-99-99", db = dueOf(b) || "9999-99-99";
-        return da.localeCompare(db);
-      }
+      if (view.sort === "recent") return timeDesc(a, b) || rank(a) - rank(b);
+      if (view.sort === "deadline") return dueAsc(a, b) || rank(a) - rank(b) || timeDesc(a, b);
       const u = (URG[a.urgency] ?? 9) - (URG[b.urgency] ?? 9);
-      if (u !== 0) return u;
-      return (dueOf(a) || "9999-99-99").localeCompare(dueOf(b) || "9999-99-99");
+      return u || dueAsc(a, b) || rank(a) - rank(b) || timeDesc(a, b);
     });
     return list;
   }
@@ -3337,8 +3343,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       const v2 = p1Items().filter((i) => (Number(i.vipRank) || 3) === 2).length;
       note.style.display = "";
       const sortLabel = view.sort === "recent" ? "최신 수신순(위가 최신)" : (view.sort === "deadline" ? "마감 임박순" : "긴급도·마감순");
-      note.innerHTML = "정렬 <b>1-1</b> 최우선 발신(" + v1 + "건) → <b>1-2</b> 주요 발신 · 내가 수신 " + v2 + "건 → " +
-        "<b>1-3</b> 본문 지목, 그 안에서 " + sortLabel +
+      note.innerHTML = "<b>최신 수신순</b>(위가 최신) · 등급 <b>1-1</b> 최우선(" + v1 + "건) · <b>1-2</b> 주요·내가 수신(" + v2 + "건) · " +
+        "<b>1-3</b> 본문 지목" + (view.sort === "recent" ? "" : " · 지금 <b>" + sortLabel + "</b> 정렬") +
         (function () {
           const mine = p1Items().filter((i) => { const r = ruleForItem(i); return r && r.p === 1; }).length;
           return mine ? " · <span style=\"color:var(--violet); font-weight:700\">⚙️ 내 규칙 " + mine + "건</span>" : "";

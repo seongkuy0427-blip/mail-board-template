@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1195,12 +1195,45 @@ def similar_payload(target: dict, candidates: list[dict]) -> dict:
             "temperature": 0.1,
             "responseMimeType": "application/json",
             "responseSchema": SIMILAR_SCHEMA,
-            "maxOutputTokens": 1200,
+            "maxOutputTokens": 2048,        # 한국어 사유가 길어져도 JSON 이 잘리지 않게
         },
     }
     if "flash" in str(CFG.get("gemini_model") or ""):
         payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
     return payload
+
+
+def strip_json_fence(text: str) -> str:
+    """Gemini 가 ```json … ``` 코드펜스로 감싸 보내도 JSON 본문만 남긴다."""
+    t = str(text or "").strip()
+    if not t.startswith("```"):
+        return t
+    t = t[3:]
+    nl = t.find("\n")
+    if nl != -1 and len(t[:nl].strip()) <= 16 and " " not in t[:nl].strip():
+        t = t[nl + 1:]                       # ```json 같은 언어 태그 줄은 버린다
+    if t.rstrip().endswith("```"):
+        t = t.rstrip()[:-3]
+    return t.strip()
+
+
+def parse_gemini_json(text: str):
+    """응답 텍스트 → JSON. 코드펜스나 앞뒤 설명 문장이 섞여도 건져 낸다."""
+    raw = str(text or "").strip()
+    cands = [raw, strip_json_fence(raw)]
+    for s in list(cands):
+        m = re.search(r"[\[{]", s)
+        if not m:
+            continue
+        body = s[m.start():]
+        end = max(body.rfind("}"), body.rfind("]"))
+        cands.append(body[:end + 1] if end > 0 else body)
+    for cand in cands:
+        try:
+            return json.loads(cand)
+        except (TypeError, ValueError):
+            pass
+    raise sm.GeminiError("Gemini 응답을 JSON 으로 읽지 못했습니다(형식 오류)")
 
 
 def gemini_pick_similar(target: dict, candidates: list[dict]) -> list[dict]:
@@ -1211,11 +1244,18 @@ def gemini_pick_similar(target: dict, candidates: list[dict]) -> list[dict]:
         raw = hook(target, candidates)
     else:
         data = gem._request(similar_payload(target, candidates))
+        cand = (data.get("candidates") or [{}])[0] if isinstance(data, dict) else {}
+        parts = ((cand.get("content") or {}).get("parts") or [])
+        text = "".join(str(p.get("text") or "") for p in parts).strip()
+        if not text:
+            reason = str(cand.get("finishReason") or "")
+            raise sm.GeminiError("Gemini 응답이 비어 있습니다" + (f" (finishReason={reason})" if reason else ""))
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError) as e:
-            raise sm.GeminiError(f"Gemini 응답 형식 오류: {json.dumps(data, ensure_ascii=False)[:300]}") from e
-        raw = json.loads(text)
+            raw = parse_gemini_json(text)
+        except sm.GeminiError:
+            if str(cand.get("finishReason") or "") == "MAX_TOKENS":
+                raise sm.GeminiError("Gemini 응답이 길어 잘렸습니다(MAX_TOKENS)") from None
+            raise
     rows = raw.get("picks") if isinstance(raw, dict) else raw
     if not isinstance(rows, list):
         return []
@@ -1239,6 +1279,34 @@ def gemini_pick_similar(target: dict, candidates: list[dict]) -> list[dict]:
         if len(out) >= SIMILAR_MAX:
             break
     return out
+
+
+def similar_error_message(e: BaseException) -> str:
+    """✨ AI 정밀 분석 실패 원인을 사용자가 읽을 수 있는 한 줄로 바꿔 준다.
+
+    키·요청 본문 같은 비밀값은 메시지에 담지 않는다 — 원인 유형과 예외 이름만 쓴다.
+    """
+    text = f"{type(e).__name__}: {e}".lower()
+    codes: set[int] = set()
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    if isinstance(status, int):
+        codes.add(status)
+    m = re.search(r"\b(?:http|status|code)[ :]*([45]\d\d)\b", text)
+    if m:
+        codes.add(int(m.group(1)))
+    if 429 in codes or "resource_exhausted" in text or "quota" in text or "rate limit" in text:
+        return "Gemini API 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."
+    if codes & {401, 403} or any(k in text for k in (
+            "api_key_invalid", "api key not valid", "invalid api key",
+            "permission_denied", "unauthenticated")):
+        return ("Gemini API 키가 유효하지 않거나 권한이 없습니다. "
+                "서버 .env 의 GEMINI_API_KEY 를 확인해 주세요.")
+    if any(k in text for k in (
+            "timeout", "timed out", "connection", "network", "getaddrinfo",
+            "name or service not known", "temporary failure", "unreachable",
+            "ssl", "proxy", "remotedisconnected", "connectionreset")):
+        return "Gemini 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+    return f"AI 분석에 실패했습니다({type(e).__name__}). 잠시 후 다시 시도해 주세요."
 
 
 def similar_analyze(uid: str, mail_id: str) -> dict:
@@ -2021,7 +2089,7 @@ class PortalHandler(BaseHTTPRequestHandler):
             print(f"[similar] {uid} {mail_id} 실패: {type(e).__name__}: {str(e)[:300]}", file=sys.stderr)
             self._json(HTTPStatus.BAD_GATEWAY,
                        {"ok": False, "code": "ai_failed",
-                        "message": "AI 분석에 실패했습니다. 잠시 후 다시 시도해 주세요."})
+                        "message": similar_error_message(e)})
             return
         code = HTTPStatus.OK
         if not result.get("ok"):
