@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -180,6 +180,13 @@ KEY_LOCK = threading.Lock()
 LOGIN_FAILS: dict[str, list[float]] = {}
 LOGIN_LOCK = threading.Lock()
 INDEX_CACHE: dict[str, Any] = {"mtime": 0.0, "bytes": None}
+
+# 전송 최적화 — /api/data(보드 JSON)는 사용자당 11MB · gzip 1.2MB 라 매 요청 압축은 낭비다.
+#  (path → [mtime_ns, size, gzip bytes, etag]) 로 압축본을 재사용하고, 내용이 그대로면
+#  If-None-Match 에 304(본문 0바이트)로 답해 5분 자동 새로고침이 거의 빈 패킷으로 끝난다.
+GZ_CACHE: dict[str, list[Any]] = {}
+GZ_LOCK = threading.Lock()
+GZ_CACHE_MAX = 24                 # 사용자 수 × 여유 — 넘치면 오래된 것부터 버린다
 SESSION_HANDOFF: dict[str, tuple[Any, float]] = {}   # 동기화가 연 웹메일 세션을 백필이 이어 쓴다
 STOP = threading.Event()
 HTTPD: Any = None                       # serve_forever 중인 서버 — 자동 재시작 때 내린다
@@ -920,6 +927,13 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         board.setdefault("criteria", {})
         update_user_meta(uid, owner=owner_box, needsRelogin=False, email=board["account"])
 
+        # 직급 자동 추론 — 사내 조직도의 '직위' 칸이 비어 이름만 뜨는 경우를 보완한다.
+        #  이미 쌓인 기록부터 먼저 보고(신규 메일이 없어도 다음 동기화에 채워진다), 첫 실행이면 아래에서 한 번 더.
+        if sm.ensure_owner_title(board):
+            owner_box = {k: sm.OWNER.get(k) for k in ("name", "title", "dept", "company", "email")}
+            update_user_meta(uid, owner=owner_box)
+            print(f"[sync] {uid} 직급 자동 추론 — {sm.OWNER.get('name')} {sm.OWNER.get('title')}", flush=True)
+
         # ── 새 메일
         base = sm.max_mf_no(board)
         set_status(uid, phase="list", progress=12, message="편지함을 확인하는 중…")
@@ -963,10 +977,13 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
 
         added = 0
         merged = 0
+        title_sent: list[str] = []      # 직급 추론용 서명 글 — 보낸편지함
+        title_inbox: list[str] = []     # 직급 추론용 호칭·인용 글 — 받은편지함
         for row in inbox:
             detail = nm.read_mail("inbox", row["mf_no"])
             if not detail.get("subject"):
                 detail["subject"] = row["subject"]
+            title_inbox.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
             if CFG["images"] and detail.get("images"):
                 detail["imagesData"] = sm.collect_images(nm, detail["images"], report)
             analysis = analyze(detail, "받은편지함")
@@ -985,12 +1002,18 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             detail = nm.read_mail("sent", row["mf_no"])
             if not detail.get("subject"):
                 detail["subject"] = row["subject"]
+            title_sent.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
             analysis = analyze(detail, "보낸편지함")
             if sm.apply_sent_reply(board["items"], detail, analysis, contacts):
                 replied += 1
             tick("sent")
 
         # ── 메타
+        #  첫 실행은 지금 모은 메일에서 직급을 한 번 더 추론한다(위에는 쌓인 기록이 없었으므로)
+        if sm.ensure_owner_title(board, sent_texts=title_sent, inbox_texts=title_inbox):
+            owner_box = {k: sm.OWNER.get(k) for k in ("name", "title", "dept", "company", "email")}
+            update_user_meta(uid, owner=owner_box)
+            print(f"[sync] {uid} 직급 자동 추론 — {sm.OWNER.get('name')} {sm.OWNER.get('title')}", flush=True)
         set_status(uid, phase="save", progress=97, message="보드를 저장하는 중…")
         stamp_hm = now.strftime("%Y-%m-%d %H:%M")
         board["updatedAt"] = f"{stamp_hm} (KST)"
@@ -1680,6 +1703,9 @@ class PortalHandler(BaseHTTPRequestHandler):
         if gzip_ok and "gzip" in accept and len(body) > 1024 and not ctype.startswith("image/"):
             body = gzip.compress(body, 6)
             hdrs["Content-Encoding"] = "gzip"
+        if gzip_ok and not ctype.startswith("image/"):
+            # 같은 URL 이 압축본/평문 두 가지로 내려갈 수 있음을 중간 캐시에 알린다
+            hdrs["Vary"] = "Accept-Encoding"
         hdrs["Content-Length"] = str(len(body))
         self.send_response(code)
         for k, v in hdrs.items():
@@ -1687,6 +1713,21 @@ class PortalHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def _not_modified(self, etag: str) -> None:
+        """내용이 그대로면 본문 없이 304 — 1.2MB 대신 헤더 몇 줄만 오간다."""
+        self.send_response(HTTPStatus.NOT_MODIFIED)
+        for k, v in {"ETag": etag, "Vary": "Accept-Encoding", "Cache-Control": "no-cache",
+                     **SECURITY_HEADERS}.items():
+            self.send_header(k, v)
+        self.end_headers()
+
+    def _if_none_match(self, etag: str) -> bool:
+        """If-None-Match 가 이 응답의 ETag 와 같은지(와일드카드 포함)."""
+        raw = (self.headers.get("If-None-Match") or "").strip()
+        if not raw:
+            return False
+        return raw == "*" or etag in [x.strip() for x in raw.split(",")]
 
     def _json(self, code: int, obj: Any, **kw: Any) -> None:
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
@@ -1780,7 +1821,11 @@ class PortalHandler(BaseHTTPRequestHandler):
                 uid = self._require_user()
                 if not uid:
                     return
-                self._json(HTTPStatus.OK, merged_contacts(uid))
+                etag = contacts_etag(uid)
+                if self._if_none_match(etag):
+                    self._not_modified(etag)
+                    return
+                self._json(HTTPStatus.OK, merged_contacts(uid), extra={"ETag": etag})
                 return
             if path == "/api/state":
                 uid = self._require_user()
@@ -1910,9 +1955,29 @@ class PortalHandler(BaseHTTPRequestHandler):
         if not uid:
             return
         path = user_path(uid, "board.json")
-        if not os.path.exists(path):
+        try:
+            st = os.stat(path)
+        except OSError:
             self._json(HTTPStatus.ACCEPTED, {"ok": False, "pending": True, "status": public_status(uid)})
             return
+        mtime_ns, size = st.st_mtime_ns, st.st_size
+        etag = '"%x-%x"' % (mtime_ns, size)
+        if self._if_none_match(etag):           # 바뀐 게 없으면 파일도 압축도 하지 않는다
+            self._not_modified(etag)
+            return
+        extra = {"X-Portal-User": uid, "ETag": etag}
+        accept = (self.headers.get("Accept-Encoding") or "").lower()
+        gz = None
+        if "gzip" in accept:
+            with GZ_LOCK:
+                hit = GZ_CACHE.get(path)
+                if hit and hit[0] == mtime_ns and hit[1] == size:
+                    gz = hit[2]
+            if gz is not None:                  # 지난번에 만든 압축본 재사용 (11MB → 1.2MB)
+                self._send(HTTPStatus.OK, gz, "application/json; charset=utf-8",
+                           extra={**extra, "Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+                           gzip_ok=False)
+                return
         try:
             with open(path, "rb") as f:
                 body = f.read()
@@ -1922,8 +1987,18 @@ class PortalHandler(BaseHTTPRequestHandler):
         if not body.strip().startswith(b"{"):
             self._json(HTTPStatus.ACCEPTED, {"ok": False, "pending": True, "status": public_status(uid)})
             return
-        self._send(HTTPStatus.OK, body, "application/json; charset=utf-8",
-                   extra={"X-Portal-User": uid})
+        if gz is None and "gzip" in accept:
+            gz = gzip.compress(body, 6)
+            with GZ_LOCK:
+                if len(GZ_CACHE) >= GZ_CACHE_MAX:
+                    for old in list(GZ_CACHE)[:max(1, GZ_CACHE_MAX // 4)]:
+                        GZ_CACHE.pop(old, None)
+                GZ_CACHE[path] = [mtime_ns, size, gz, etag]
+            self._send(HTTPStatus.OK, gz, "application/json; charset=utf-8",
+                       extra={**extra, "Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+                       gzip_ok=False)
+            return
+        self._send(HTTPStatus.OK, body, "application/json; charset=utf-8", extra=extra)
 
     def _api_similar(self) -> None:
         """✨ AI 정밀 분석 — 버튼을 눌렀을 때만 한 번 돌고, 결과는 메일별로 캐시된다."""
@@ -2015,6 +2090,16 @@ class PortalHandler(BaseHTTPRequestHandler):
 
 def state_path(uid: str) -> str:
     return user_path(uid, "state.json")
+
+
+def contacts_etag(uid: str) -> str:
+    """주소록 응답의 ETag — 공용 조직도·개인주소록 파일이 바뀔 때만 달라진다."""
+    def mt(p: str) -> int:
+        try:
+            return os.stat(p).st_mtime_ns
+        except OSError:
+            return 0
+    return '"%x-%x"' % (mt(shared_org_path()), mt(user_path(uid, "personal_contacts.json")))
 
 
 def load_state(uid: str) -> dict:

@@ -106,8 +106,10 @@ P3_CATEGORY_REASON = P3_LABEL + " · 현장 일상 공유"
 EXTERNAL_CATS = {"PTR", "승인/검토", "결품/보고", "불량/품질", "조직/업무", "일정/공유", "반출/전용"}
 CATEGORIES = ["승인/검토", "PTR", "결품/보고", "불량/품질", "재고/실사", "현황/보고", "출하/보급",
               "납입요청", "일정/공유", "조직/업무", "공지/안전", "자료요청", "자재/확인", "기타"]
-TITLE_WORDS = ("상무", "전무", "이사", "부장", "차장", "과장", "대리", "사원", "팀장", "실장", "소장",
-               "주임", "계장", "반장", "직장", "대표")
+# 이름 뒤에 붙는 직급 — 긴 것부터 먼저 걸리게 순서를 지킨다('과장보'→과장, '본부장'→부장 방지).
+TITLE_WORDS = ("과장보", "부사장", "본부장", "상무", "전무", "이사", "부장", "차장", "과장", "대리",
+               "사원", "팀장", "실장", "소장", "주임", "계장", "반장", "직장", "대표",
+               "수석", "책임", "선임", "매니저", "프로", "조장")
 SHIP_KEYWORDS = ("선적", "b/l", "bl no", "항공", "해상", "통관", "해외물류", "asn", "수출", "수입", "부킹", "bl ")
 QUOTE_MARKERS = ("보낸 사람:", "보낸사람:", "-----original", "from:", "sent:", "________________________________")
 DEFAULT_MODEL = "gemini-2.5-flash"
@@ -178,6 +180,112 @@ def build_mention_re(name: str, title: str = "") -> re.Pattern:
     if not pats:
         return re.compile(r"(?!x)x")
     return re.compile("|".join(pats))
+
+
+# ── 직급 자동 추론 ────────────────────────────────────────────────
+#  Nmail 조직도의 '직위' 칸이 비어 있으면 owner['title'] 이 빈 채로 남아 화면에
+#  '김성규' 처럼 이름만 뜬다. 그래서 본인이 보낸/받은 메일 글에서 '이름 + 직급'을
+#  세어 가장 많이 나온 직급을 채운다(서명·호칭이 가장 믿을 만한 근거다).
+_TITLE_RE_CACHE: dict[str, re.Pattern | None] = {}
+
+
+def title_of_name_re(name: str) -> re.Pattern | None:
+    """`김성규 과장` 처럼 이름 바로 뒤에 직급이 오는 패턴. 이름이 2글자 미만이면 None."""
+    n = re.sub(r"\s+", "", name or "")
+    if len(n) < 2:
+        return None
+    if n in _TITLE_RE_CACHE:
+        return _TITLE_RE_CACHE[n]
+    body = r"\s*".join(re.escape(ch) for ch in n)          # '김 성규' 도 허용
+    pat = re.compile(rf"(?<![가-힣]){body}\s*({'|'.join(TITLE_WORDS)})")
+    _TITLE_RE_CACHE[n] = pat
+    return pat
+
+
+def _title_sample_text(it: dict) -> str:
+    parts = [str(it.get(k) or "") for k in ("title", "summary", "bodyText", "sender", "senderName")]
+    for m in it.get("thread") or []:
+        if isinstance(m, dict):
+            parts.append(str(m.get("from") or ""))
+            parts.append(str(m.get("gist") or ""))
+    return "\n".join(parts)
+
+
+def _count_titles(pat: re.Pattern, texts: list[str], weight: int) -> tuple[dict[str, int], dict[str, int]]:
+    scores: dict[str, int] = {}
+    first: dict[str, int] = {}
+    order = 0
+    for text in texts:
+        for m in pat.finditer(text or ""):
+            t = m.group(1)
+            if t not in scores:
+                scores[t], first[t] = 0, order
+                order += 1
+            scores[t] += weight
+    return scores, first
+
+
+def infer_owner_title(name: str, items: list[dict] | None = None, *,
+                      sent_texts: list[str] | None = None,
+                      inbox_texts: list[str] | None = None,
+                      limit: int = 400) -> str:
+    """메일 글에서 '이름 + 직급'을 세어 가장 많이 나온 직급을 고른다(없으면 "").
+
+    · 보낸 메일(서명)에서 찾으면 그것을 먼저 믿는다 — 본인이 쓴 직급이 가장 정확하다.
+    · 없으면 받은 메일(호칭·인용된 서명)에서 고른다.
+    · 최근 메일부터 각각 limit 건만 본다(9,000건 전체를 훑지 않아 빠르다).
+    `items` 는 보드 항목, sent_texts/inbox_texts 는 방금 읽은 메일 본문을 바로 넘길 때 쓴다.
+    """
+    pat = title_of_name_re(name)
+    if pat is None:
+        return ""
+    sent = list(sent_texts or [])
+    inbox = list(inbox_texts or [])
+    rows = [it for it in (items or []) if isinstance(it, dict)]
+    if rows:
+        rows.sort(key=lambda it: str(it.get("receivedAt") or it.get("lastAt") or ""), reverse=True)
+        sent += [_title_sample_text(it) for it in rows
+                 if str(it.get("mailbox") or "").lower() == "sent"][:limit]
+        inbox += [_title_sample_text(it) for it in rows
+                  if str(it.get("mailbox") or "").lower() != "sent"][:limit]
+    sent_scores, sent_first = _count_titles(pat, sent, 3)     # 보낸 메일 = 가중치 3
+    if sent_scores:
+        return max(sent_scores, key=lambda t: (sent_scores[t], -sent_first[t]))
+    in_scores, in_first = _count_titles(pat, inbox, 1)       # 받은 메일 = 가중치 1
+    if not in_scores:
+        return ""
+    return max(in_scores, key=lambda t: (in_scores[t], -in_first[t]))
+
+
+def ensure_owner_title(data: dict | None = None, *,
+                       sent_texts: list[str] | None = None,
+                       inbox_texts: list[str] | None = None) -> str:
+    """owner 직급이 비어 있으면 기록에서 추론해 채우고, 지목 판정 규칙까지 다시 세운다.
+
+    이미 채워진 사용자는 아무 일도 하지 않는다(다음 동기화마다 불려도 안전).
+    찾은 직급을 돌려준다(못 찾으면 "").
+    """
+    target = data if isinstance(data, dict) else {}
+    owner = target.get("owner") if isinstance(target.get("owner"), dict) else OWNER
+    if (owner.get("title") or "").strip():
+        return ""
+    name = (owner.get("name") or OWNER.get("name") or "").strip()
+    title = infer_owner_title(name, list(target.get("items") or []),
+                              sent_texts=sent_texts, inbox_texts=inbox_texts)
+    if not title:
+        return ""
+    owner["title"] = title
+    OWNER["title"] = title
+    configure(dict(OWNER))            # 본문 지목 판정(성+직급)을 새 직급으로 다시 만든다
+    for it in target.get("items") or []:      # 직급이 생기면 '김 과장' 지목 건이 1순위로 올라온다
+        if isinstance(it, dict):
+            try:
+                classify(it)
+            except Exception:  # noqa: BLE001 - 한 건 실패가 저장을 막지 않게
+                continue
+    if isinstance(target.get("owner"), dict):
+        target["owner"]["title"] = title
+    return title
 
 
 def configure(owner: dict | None = None, cfg: dict | None = None) -> dict:
@@ -1477,6 +1585,10 @@ def sync(args: argparse.Namespace) -> dict:
     data["account"] = OWNER.get("email") or data.get("account") or ""
     report["owner"] = {k: OWNER.get(k) for k in ("name", "title", "dept", "email")}
     report["vips"] = [v[0] + " " + str(v[2]) for v in VIPS]
+    # 조직도 직위 칸이 비어 있으면 지난 기록에서 직급을 추론해 채운다(신규 메일이 없어도)
+    inferred = ensure_owner_title(data)
+    if inferred:
+        report["owner"]["title"] = inferred
 
     if is_new:
         # 첫 실행: 최근 N일 메일로 보드를 새로 채운다(기존 기록을 지울 일이 없다).
@@ -1512,10 +1624,13 @@ def sync(args: argparse.Namespace) -> dict:
             return heuristic_analysis(mail, _is_to(mail))
 
     added = 0
+    title_sent: list[str] = []
+    title_inbox: list[str] = []
     for row in inbox:
         detail = nm.read_mail("inbox", row["mf_no"])
         if not detail.get("subject"):
             detail["subject"] = row["subject"]
+        title_inbox.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
         if args.images and detail.get("images"):
             detail["imagesData"] = collect_images(nm, detail["images"], report)
         analysis = analyze(detail, "받은편지함")
@@ -1535,6 +1650,7 @@ def sync(args: argparse.Namespace) -> dict:
         detail = nm.read_mail("sent", row["mf_no"])
         if not detail.get("subject"):
             detail["subject"] = row["subject"]
+        title_sent.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
         analysis = analyze(detail, "보낸편지함")
         hit = apply_sent_reply(items, detail, analysis, contacts)
         if hit:
@@ -1574,6 +1690,11 @@ def sync(args: argparse.Namespace) -> dict:
     items.sort(key=lambda it: (str(it.get("lastAt") or it.get("receivedAt") or ""), str(it.get("id"))),
                reverse=True)
     data["items"] = items
+    # 첫 실행이라 위에서 못 채웠으면, 방금 모은 메일로 한 번 더 직급을 추론한다
+    infer_after = ensure_owner_title(data, sent_texts=title_sent, inbox_texts=title_inbox)
+    if infer_after:
+        report["owner"]["title"] = infer_after
+        data["owner"] = dict(OWNER)
 
     if args.dry_run:
         report["written"] = None

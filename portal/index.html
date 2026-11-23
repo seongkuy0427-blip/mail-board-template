@@ -1590,6 +1590,11 @@
 
   let ENC = null, DATA = null, PIN = null;
   let lastSyncAt = 0;
+  /* 포털 모드 — 서버 ETag 로 '바뀐 게 없으면' 1.2MB 를 다시 받지 않고 화면도 다시 그리지 않는다 */
+  let PT_ETAG = "", PT_CETAG = "";
+  /* 🗂 이전 기록(archived) 검색 — 9,000건대가 한 번에 걸릴 수 있어 한 번에 200건만 그리고 더 보기로 펼친다 */
+  const HIST_PAGE = 200;
+  let HIST_SHOWN = HIST_PAGE, HIST_Q = null;
   let STORE = loadState();
   let view = { tab: "p1", q: "", sort: "recent", day: null, ym: null, sender: "all", group: false, replyOnly: false, showDone: false, openId: null, calOpen: false, cusId: null, cusInbox: true, cusSent: true, kpi: "" };
 try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
@@ -1742,26 +1747,29 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   async function refresh(manual) {
     const btn = $("refreshBtn"); btn.classList.add("spin");
     try {
+      let changed = true;
       if (PORTAL) {
-        await portalRefresh(manual);
+        changed = await portalRefresh(manual);   /* false = 서버 내용 그대로(304) */
       } else {
         const enc = await fetchEnc();
         DATA = await decryptData(enc, PIN); ENC = enc;
       }
       lastSyncAt = Date.now();
-      ADDR = null;
       $("sync").innerHTML = "마지막 동기화<br><b>" + stamp(new Date()) + "</b>";
       if ($("refreshBtn")) $("refreshBtn").title = "지금 새로고침 · 마지막 동기화 " + stamp(new Date());
-      renderAll();
-      wxLoad();
-      caseWarm();
-      if (view.openId) openDrawer(view.openId, "keep");
+      if (changed) {
+        ADDR = null;
+        renderAll();
+        wxLoad();
+        caseWarm();
+        if (view.openId) openDrawer(view.openId, "keep");
+        /* 다른 기기에서 바뀐 상태도 이 주기에 함께 맞춘다 */
+        if (cyLinked()) cySync(false);
+      }
       const fresh = notifyNewP1();
       /* 브리핑이 열려 있으면 내용을 다시 계산하고, ‘나중에’로 닫은 지 30분이 지났으면 다시 띄운다 */
       briefTick();
-      /* 다른 기기에서 바뀐 상태도 이 주기에 함께 맞춘다 */
-      if (cyLinked()) cySync(false);
-      if (manual && !fresh) toast("최신 데이터로 갱신했습니다");
+      if (manual && !fresh) toast(changed ? "최신 데이터로 갱신했습니다" : "새로 확인했습니다 — 바뀐 메일이 없습니다");
     } catch (e) {
       if (manual) toast(PORTAL ? ("갱신하지 못했습니다 — " + (e && e.message ? e.message : "잠시 후 다시 시도")) : "갱신 실패 — PIN을 다시 확인해 주세요");
       if (e && e.name === "OperationError") lock();
@@ -2274,6 +2282,15 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     return Array.from(map.values()).sort((a, b) => a.vipRank - b.vipRank || b.items.length - a.items.length || a.label.localeCompare(b.label));
   }
   function matches(it) { const q = view.q.trim().toLowerCase(); return q ? searchBlob(it).includes(q) : true; }
+
+  /* 🗂 이전 기록 검색 결과 페이지 — 검색어가 바뀌면 처음 200건으로 돌아간다.
+     {rows: 지금 그릴 행, left: 남은 건수, total: 전체 건수} */
+  function histPage(all, q) {
+    if (HIST_Q !== q) { HIST_Q = q; HIST_SHOWN = HIST_PAGE; }
+    const total = all.length;
+    const left = Math.max(0, total - HIST_SHOWN);
+    return { rows: all.slice(0, HIST_SHOWN), left: left, total: total };
+  }
 
   /* ---------------- ☀️ 오늘의 업무 브리핑 (아침 팝업) ----------------
      잠금 해제 직후 화면 중앙에 크게 띄우는 하루 요약. ‘간밤에 온 메일 → 오늘 챙길 것’ 순서로 읽힌다.
@@ -3430,13 +3447,17 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (bkey) bulkPrune(bkey, main.map((it) => it.id));
     let html = "";
     let extra = (q && view.tab !== "p3") ? pinFirst(sortList(p3Items().filter(matches))) : [];
-    /* 검색어가 있을 때만 지난 메일(archived)을 '이전 기록'으로 함께 보여준다 */
-    let history = q ? pinFirst(sortList(archItems().filter(matches).filter((it) => !view.replyOnly || replyOf(it) === "needs_reply"))) : [];
+    /* 검색어가 있을 때만 지난 메일(archived)을 '이전 기록'으로 함께 보여준다.
+       9,000건대가 한 번에 걸릴 수 있어 처음에는 200건만 그리고 나머지는 [더 보기] 로 펼친다. */
+    const histAll = q ? pinFirst(sortList(archItems().filter(matches).filter((it) => !view.replyOnly || replyOf(it) === "needs_reply"))) : [];
+    const hp = histPage(histAll, q);
+    const histLeft = hp.left;
+    const history = hp.rows;
 
     if (view.tab === "p1") {
       html += '<div class="sec-title">🔴 즉시 확인 <span class="hint">' + main.length + "건 · 행을 누르면 상세 · 회신 배지를 누르면 바로 전환</span></div>";
       if (main.length) html += bulkBarHtml(main);
-      html += main.length ? rowsBlock(main) : '<div class="empty">' + (view.day ? "이 날짜에 마감인 즉시 확인 건이 없습니다." : (view.replyOnly ? "회신이 필요한 즉시 확인 건이 없습니다." : (q && history.length ? "오늘(11/19 이후) 즉시 확인에는 없습니다. 아래 ‘이전 기록’에서 " + history.length + "건 찾았습니다." : "지금은 본문에서 회원님을 직접 지목한 메일이 없습니다.<br>고객사·사내 이슈는 <b>🟡 흐름 참고</b> 탭에서 볼 수 있습니다."))) + "</div>";
+      html += main.length ? rowsBlock(main) : '<div class="empty">' + (view.day ? "이 날짜에 마감인 즉시 확인 건이 없습니다." : (view.replyOnly ? "회신이 필요한 즉시 확인 건이 없습니다." : (q && histAll.length ? "오늘(11/19 이후) 즉시 확인에는 없습니다. 아래 ‘이전 기록’에서 " + histAll.length + "건 찾았습니다." : "지금은 본문에서 회원님을 직접 지목한 메일이 없습니다.<br>고객사·사내 이슈는 <b>🟡 흐름 참고</b> 탭에서 볼 수 있습니다."))) + "</div>";
     } else if (view.tab === "p2") {
       html += '<div class="banner">🟡 <div><b>흐름 참고</b> — 고객사(@gm.com)·MC↔GM 왕복, 사내 결품·PTR·조직 공지처럼 흐름을 알아야 하는 건. 내가 이름으로 지목된 건 아니면 여기로 옵니다.</div></div>';
       if (main.length) html += bulkBarHtml(main);
@@ -3452,10 +3473,13 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (history.length) {
       const hIn = history.filter((it) => (it.mailbox || "inbox") !== "sent");
       const hSent = history.filter((it) => it.mailbox === "sent");
-      html += '<div class="sec-title" style="margin-top:12px">🗂 이전 기록 <span class="hint">' + history.length + "건 · 검색 전용</span></div>" +
+      html += '<div class="sec-title" style="margin-top:12px">🗂 이전 기록 <span class="hint">' + histAll.length + "건 · 검색 전용" +
+        (histLeft ? " · 지금 " + history.length + "건 표시" : "") + "</span></div>" +
         '<div class="banner" style="margin-bottom:5px">ℹ️ <div>기본 화면에서는 빠져 있는 지난 메일입니다. 검색어를 지우면 다시 숨겨집니다. <b>📥 받은편지함</b>과 <b>📤 보낸편지함</b>을 나눠 보여줍니다.</div></div>';
       if (hIn.length) html += '<div class="sec-title">📥 받은편지함 <span class="hint">' + hIn.length + "건</span></div>" + rowsBlock(hIn);
       if (hSent.length) html += '<div class="sec-title">📤 보낸편지함 <span class="hint">' + hSent.length + "건</span></div>" + rowsBlock(hSent);
+      if (histLeft) html += '<div class="rm-more"><span class="pg-info">이전 기록 ' + histAll.length + "건 중 " + history.length + '건 표시</span>' +
+        '<button type="button" data-hist-more="1">더 보기 (+' + Math.min(HIST_PAGE, histLeft) + ")</button></div>";
     }
     $("listWrap").innerHTML = html;
     $("dayChip").classList.remove("on");
@@ -4842,7 +4866,19 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   $("lightbox").addEventListener("click", (e) => { if (e.target.id !== "lbImg") closeLightbox(); });
   $("lbClose").addEventListener("click", closeLightbox);
-  $("q").addEventListener("input", (e) => { view.q = e.target.value; paintWebmailSearch(); renderList(); });
+  /* 검색은 120ms 디바운스 — 9,242건(지난 기록 포함)을 글자마다 다시 훑지 않는다 */
+  let qTimer = 0;
+  $("q").addEventListener("input", (e) => {
+    view.q = e.target.value; paintWebmailSearch();
+    if (qTimer) clearTimeout(qTimer);
+    qTimer = setTimeout(() => { qTimer = 0; renderList(); }, 120);
+  });
+  $("q").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (qTimer) { clearTimeout(qTimer); qTimer = 0; }
+    renderList();
+  });
   $("sort").addEventListener("change", (e) => { view.sort = e.target.value; renderSeg(); renderList(); });
   $("replyChk").addEventListener("change", (e) => {
     view.replyOnly = e.target.checked;
@@ -5013,6 +5049,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (bk) { e.preventDefault(); e.stopPropagation(); view.cusId = null; view.day = null; cusFormReset(); renderCalendar(); renderList(); return; }
     const cd = e.target.closest("[data-cus-del]");
     if (cd) { e.preventDefault(); e.stopPropagation(); cusDel(cd.dataset.cusDel); return; }
+    /* 🗂 이전 기록 [더 보기] — 200건씩 이어서 그린다 */
+    if (e.target.closest("[data-hist-more]")) {
+      e.preventDefault(); e.stopPropagation();
+      HIST_SHOWN += HIST_PAGE; renderList();
+      return;
+    }
     /* ⏰ 오늘 마감의 오늘 일정 카드 — 그 일정의 관련 메일 보기로 바로 이동 */
     const kc = e.target.closest("[data-kpi-cus]");
     if (kc) {
@@ -5544,10 +5586,14 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (st.state === "error") return st.message || "메일 수집 중 오류가 발생했습니다";
     return st.message || "준비 중…";
   }
-  async function portalLoadContacts() {
+  async function portalLoadContacts(force) {
     try {
-      const res = await fetch("/api/contacts", { cache: "no-store" });
+      const headers = {};
+      if (!force && PT_CETAG) headers["If-None-Match"] = PT_CETAG;
+      const res = await fetch("/api/contacts", { cache: "no-store", headers });
+      if (res.status === 304) return;          /* 주소록도 그대로 — 50KB 다시 받지 않는다 */
       if (!res.ok) return;
+      PT_CETAG = res.headers.get("ETag") || "";
       const j = await res.json();
       if (DATA && Array.isArray(j.contacts)) { DATA.contacts = j.contacts; ADDR = null; }
     } catch (e) {}
@@ -5559,17 +5605,22 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       } catch (e) {}
     }
-    const res = await fetch("/api/data?t=" + Date.now(), { cache: "no-store" });
+    const headers = PT_ETAG ? { "If-None-Match": PT_ETAG } : {};
+    const res = await fetch("/api/data?t=" + Date.now(), { cache: "no-store", headers });
     if (res.status === 401) { const e = new Error("로그인이 만료되었습니다 — 다시 로그인해 주세요"); e.needLogin = true; throw e; }
+    if (res.status === 304) return false;      /* 서버 내용 그대로 — 받을 것도, 다시 그릴 것도 없다 */
     if (res.status !== 200) {
       if (manual) toast("새 메일을 수집하는 중입니다 — 잠시 후 다시 눌러 주세요");
-      return;
+      return false;
     }
+    PT_ETAG = res.headers.get("ETag") || "";
     DATA = await res.json();
     await portalLoadContacts();
+    return true;
   }
   async function portalLogin(id, pw, remember) {
     const btn = $("unlockBtn");
+    PT_ETAG = ""; PT_CETAG = "";          /* 이전 세션의 ETag 로 304 를 받아 빈 화면이 되는 일 방지 */
     if ($("gateErr")) $("gateErr").textContent = "";
     btn.disabled = true; btn.textContent = "확인 중…";
     seedShow("회사 웹메일 계정을 확인하는 중…", 4, "mail.chunil.co.kr 에 로그인해 확인합니다");
@@ -5598,7 +5649,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     for (;;) {
       const res = await fetch("/api/data?t=" + Date.now(), { cache: "no-store" });
       if (res.status === 401) { const e = new Error("로그인이 만료되었습니다 — 다시 로그인해 주세요"); e.needLogin = true; throw e; }
-      if (res.status === 200) { DATA = await res.json(); break; }
+      if (res.status === 200) { PT_ETAG = res.headers.get("ETag") || ""; DATA = await res.json(); break; }
       let j = null; try { j = await res.json(); } catch (e) { j = null; }
       st = (j && j.status) || st;
       if (st && st.state === "error") throw new Error(st.message || "메일 수집에 실패했습니다");
@@ -5624,6 +5675,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     } catch (e) {}
     PORTAL_USER = ""; PORTAL_READY = false;
+    PT_ETAG = ""; PT_CETAG = ""; HIST_SHOWN = HIST_PAGE; HIST_Q = null;
     try { LSK.setUser(""); } catch (e) {}
   }
   /* ---- PC·휴대폰 상태 맞춤 (/api/state) — 캘린더·고정·확인·규칙 ---- */
