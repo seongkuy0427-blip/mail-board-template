@@ -1,0 +1,70 @@
+{
+  "app": "CHUNIL Smart Mail Portal",
+  "version": "1.2.0",
+  "generatedAt": "2026-11-23 17:18:49 (KST)",
+  "note": "자동 업데이트 기준표 — 서버는 이 파일의 sha256 과 내 파일을 비교해 달라진 것만 내려받습니다. 손으로 고치지 말고 make_manifest.py 로 다시 만드세요.",
+  "updateFiles": [
+    "index.html",
+    "server.py",
+    "scripts/sync_mail.py",
+    "scripts/backfill_archive.py"
+  ],
+  "files": {
+    "server.py": {
+      "sha256": "973b68ac639f128a6b776c45aad0227432d3029a8b20909c0a6d5ec8a977fda9",
+      "size": 97683
+    },
+    "index.html": {
+      "sha256": "7577d063be032415362f89debafa393dcd2164e1b47e885c5552ed57c753aafa",
+      "size": 376206
+    },
+    "board_config.json": {
+      "sha256": "891e8c32952e9f57c1de7ec720a4e34c63213583918e39232bffd855368459c0",
+      "size": 482
+    },
+    "README.md": {
+      "sha256": "a0e92e3f2cbd40d8c8b09ccdc313bcfd9d0bec42e4bff47ad58ed9a8397edc47",
+      "size": 16289
+    },
+    "팀원안내.txt": {
+      "sha256": "781176b7d5b5a6332c8c48563e130673d69b125be2bc4cce5f5b82d76fa84ba2",
+      "size": 1623
+    },
+    ".env.example": {
+      "sha256": "b116d05f5fa1d73ebbeb2388a8c396ba0d1f17aa3df415aecd485ed14fbf2687",
+      "size": 2054
+    },
+    ".gitignore": {
+      "sha256": "20df7379ccae750e08f0488b6123ead9b656762205178b7bdaf420a04491c876",
+      "size": 154
+    },
+    "start_portal.bat": {
+      "sha256": "89debf3544f83b94b6ed624dd8a594554edc94b79e09c773aec9b7085b88cfcf",
+      "size": 1682
+    },
+    "start_hidden.vbs": {
+      "sha256": "252178b0e2d884452f873a45dd54c7f4dc75ada301a1c937397a03866acde84e",
+      "size": 3430
+    },
+    "stop_portal.bat": {
+      "sha256": "a5b9033d773f7dbd4f382bb43324778a2588af8ff9ebc0c721393ef2e61089e1",
+      "size": 1177
+    },
+    "scripts/sync_mail.py": {
+      "sha256": "eed7cae61da316eef7a95102c9a743c5f371845e5b12e9a8992f42b060c419a8",
+      "size": 90644
+    },
+    "scripts/backfill_archive.py": {
+      "sha256": "121f4196def04ab67f30ad3b605f59c4bc90fe7165b979bde48b3480edfb81ab",
+      "size": 14651
+    },
+    "scripts/requirements.txt": {
+      "sha256": "9708127865208768bc32d7b90a78204ee9185008738cb330da499fb44ce59c0d",
+      "size": 123
+    },
+    "assets/left-banner.jpg": {
+      "sha256": "cc62266efc0d8996fd075bea6c8d5f019a5d0d90ec6c14d00876d6bc314174a3",
+      "size": 227878
+    }
+  }
+}
