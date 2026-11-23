@@ -1,0 +1,146 @@
+name: mail-board sync
+
+# 30분마다 회사 웹메일을 읽어 data.enc.json(암호문)을 갱신하고 GitHub Pages 로 배포합니다.
+# Actions 탭에서 [Run workflow] 로 직접 한 번 실행할 수 있고, 그때는 과거 메일 채우기(백필) 건수도 고를 수 있습니다.
+on:
+  schedule:
+    - cron: "23,53 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "수집·분석만 하고 커밋하지 않음"
+        type: boolean
+        default: false
+      backfill_count:
+        description: "이번 실행에서 채울 과거 메일 건수 (0 = 백필 안 함)"
+        type: string
+        default: "0"
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: mail-board-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Sync new mail (Nmail → Gemini → data.enc.json)
+        id: sync
+        env:
+          CHUNIL_ID: ${{ secrets.CHUNIL_ID }}
+          CHUNIL_PW: ${{ secrets.CHUNIL_PW }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAILBOARD_PIN: ${{ secrets.MAILBOARD_PIN }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          NMAIL_IP_CHECK: ${{ vars.NMAIL_IP_CHECK || '1' }}
+        run: |
+          ARGS="--data-enc data.enc.json"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python scripts/sync_mail.py $ARGS
+
+      - name: Backfill past mail bodies (optional)
+        id: backfill
+        # 수동 실행에서 건수를 넣었을 때만 돕니다(처음에는 0 — 기본 동기화만으로 충분합니다).
+        if: github.event_name == 'workflow_dispatch' && inputs.backfill_count != '0'
+        env:
+          CHUNIL_ID: ${{ secrets.CHUNIL_ID }}
+          CHUNIL_PW: ${{ secrets.CHUNIL_PW }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAILBOARD_PIN: ${{ secrets.MAILBOARD_PIN }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          NMAIL_IP_CHECK: ${{ vars.NMAIL_IP_CHECK || '1' }}
+        run: |
+          ARGS="--data-enc data.enc.json --limit ${{ inputs.backfill_count }} --chars 1100"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python scripts/backfill_archive.py $ARGS
+
+      - name: Commit main
+        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true'
+        run: |
+          set -uo pipefail
+          MSG="Auto-update mail board ($(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M') · 신규 ${{ steps.sync.outputs.new_count || '0' }}건 · 백필 ${{ steps.backfill.outputs.bf_filled || '0' }}건)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.enc.json
+          git commit -m "$MSG" || { echo "커밋할 변경 없음"; exit 0; }
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then exit 0; fi
+            echo "푸시 실패 — 최신 main 위에 다시 올린다 ($i/3)"
+            git fetch origin main
+            git reset --soft origin/main
+            git add data.enc.json
+            git commit -m "$MSG" || true
+            sleep 5
+          done
+          echo "main 푸시 실패"; exit 1
+
+      - name: Ensure Pages is on (gh-pages)
+        # 저장소 Settings → Pages 를 직접 켜지 않아도 되도록 시도합니다(권한이 없으면 무시 — 매뉴얼대로 직접 켜면 됩니다).
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1 || \
+          gh api -X POST "repos/${{ github.repository }}/pages" \
+            -f "source[branch]=gh-pages" -f "source[path]=/" >/dev/null 2>&1 || true
+
+      - name: Deploy gh-pages
+        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true'
+        run: |
+          set -uo pipefail
+          MSG="Auto-update mail board ($(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M'))"
+          rm -rf /tmp/ghp && mkdir -p /tmp/ghp
+          cp -f index.html data.enc.json .nojekyll README.md /tmp/ghp/
+          if [ -d assets ]; then cp -R assets /tmp/ghp/; fi
+          if git fetch origin gh-pages; then
+            git checkout -B gh-pages-deploy origin/gh-pages
+          else
+            echo "gh-pages 브랜치가 아직 없습니다 — 새로 만듭니다"
+            git checkout --orphan gh-pages-deploy
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp -rf /tmp/ghp/. .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "gh-pages 에 반영할 변경 없음"; exit 0
+          fi
+          git commit -m "$MSG" || true
+          for i in 1 2 3; do
+            if git push origin HEAD:gh-pages; then exit 0; fi
+            echo "gh-pages 푸시 실패 — 재시도 ($i/3)"
+            git fetch origin gh-pages
+            git reset --soft origin/gh-pages
+            git add -A
+            git commit -m "$MSG" || true
+            sleep 5
+          done
+          echo "gh-pages 푸시 실패"; exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "신규 ${{ steps.sync.outputs.new_count || '0' }}건 · 회신 반영 ${{ steps.sync.outputs.replied_count || '0' }}건 · 백필 ${{ steps.backfill.outputs.bf_filled || '0' }}건"
+          echo "사이트: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"

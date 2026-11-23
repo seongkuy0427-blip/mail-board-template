@@ -1,0 +1,4 @@
+# scripts/sync_mail.py 실행에 필요한 최소 의존성
+requests>=2.31,<3
+beautifulsoup4>=4.12,<5
+cryptography>=42,<46
