@@ -615,8 +615,32 @@ def run(pin: str, keep: bool) -> int:
         "안녕하십니까 ?\n천일정기화물자동차㈜ 조달물류팀 최재훈 입니다 .\n"
         "수신자 제위\n2026년 11월 24일 통합배차 송부드립니다 .")}, False)
     check("휴리스틱 요약에서 인사말 제외",
-          greet["summary"].startswith("2026년") and "안녕하십니까" not in greet["summary"],
+          "2026년 11월 24일 통합배차" in greet["summary"] and "안녕하십니까" not in greet["summary"],
           greet["summary"][:60])
+    # v1.2.7 — 📝 메일 분석은 본문 복붙이 아니라 "누가 → 누구에게 → 무엇을" 3인칭 요약
+    eop_body = sm.el_text(sm.BeautifulSoup(
+        "<div id='w'><div>피세영 대리님,</div><div>납입 담당자님</div><div>하기 품번 명일</div>"
+        "<div>07:00</div><div>기준 재고실사 요청드립니다</div><div>(MY26 EOP</div>"
+        "<div>자재로 입항지연 예상 )</div><div>42711726</div><div>HOUSING AS</div></div>",
+        "html.parser").find(id="w"))
+    check("본문 줄바꿈 정리(문장 이어 붙이기)",
+          "하기 품번 명일 07:00 기준 재고실사 요청드립니다" in eop_body
+          and "(MY26 EOP 자재로 입항지연 예상 )" in eop_body,
+          eop_body.replace("\n", " / ")[:80])
+    eop = sm.heuristic_analysis({
+        "subject": "MY26 EOP자재 재고실사 요청_11/24(화) 07시", "bodyText": eop_body,
+        "date": "2026-11-23 16:30", "from_raw": "염주희 <johhee.yeom@gm.com>",
+        "from_email": "johhee.yeom@gm.com", "to": ["Seeyoung Pi (C) <seeyoung@chunil.co.kr>"]},
+        False, {"seeyoung@chunil.co.kr": {"name": "피세영", "title": "대리", "dept": "납입1팀"},
+                "johhee.yeom@gm.com": {"name": "염주희", "title": "차장", "dept": "GM"}})
+    check("메일 분석 3인칭 요약(누가→누구에게→무엇을)",
+          eop["summary"].startswith("GM 염주희 차장이") and "피세영 대리" in eop["summary"]
+          and "11/24 07:00 기준 재고실사" in eop["summary"]
+          and "피세영 대리님," not in eop["summary"],
+          eop["summary"][:90])
+    check("요약 프롬프트에 본문 복붙 금지",
+          "그대로 옮기지 않는다" in sm.SYSTEM_PROMPT and "제3자 보고체" in sm.SYSTEM_PROMPT,
+          sm.SYSTEM_PROMPT.count("제3자 보고체"))
 
     check("기본 Gemini 모델", sm.DEFAULT_MODEL == "gemini-3.8-flash", sm.DEFAULT_MODEL)
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")

@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1128,13 +1128,13 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
 
         def analyze(mail: dict, kind: str) -> dict:
             if gem is None:
-                return sm.heuristic_analysis(mail, sm._is_to(mail))
+                return sm.heuristic_analysis(mail, sm._is_to(mail), contacts)
             try:
                 report["gemini_calls"] += 1
                 return gem.analyze(mail, kind=kind)
             except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
                 report["warnings"].append(f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}")
-                return sm.heuristic_analysis(mail, sm._is_to(mail))
+                return sm.heuristic_analysis(mail, sm._is_to(mail), contacts)
 
         def tick(phase: str) -> None:
             nonlocal done
@@ -1176,6 +1176,9 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
                 replied += 1
             tick("sent")
 
+        refreshed = sm.refresh_copied_summaries(board["items"], contacts)   # 예전 '본문 복붙' 요약 → 3인칭 (v1.2.7)
+        if refreshed:
+            print(f"[sync] {uid} 예전 요약 {refreshed}건을 3인칭 요약으로 정리", flush=True)
         # ── 메타
         #  첫 실행은 지금 모은 메일에서 직급을 한 번 더 추론한다(위에는 쌓인 기록이 없었으므로)
         if sm.ensure_owner_title(board, sent_texts=title_sent, inbox_texts=title_inbox):

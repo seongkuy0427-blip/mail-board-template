@@ -1342,11 +1342,102 @@ CELL_TAGS = frozenset({"td", "th"})              # 표 칸은 붙으면 안 되�
 VOID_TAGS = frozenset({"br", "hr", "img", "input", "meta", "link", "wbr"})
 
 
+#  v1.2.7 — 웹메일 편집기가 <p>/<div> 를 문장 조각마다 쓰는 경우가 많아
+#  블록 경계는 '이어 붙일 수 있는 줄바꿈'(\n), <br> 는 '진짜 줄바꿈'(\x01),
+#  표 <tr> 행은 '행 경계'(\x02) 로 표시한 뒤 join_body_text() 가 문장을 이어 붙인다.
+HARD_BR = "\x01"
+HARD_ROW = "\x02"
+HARD_PARA = "\x03"           # 글자 없는 빈 블록 = 단락 구분
+
+#  이어 붙이지 않는(줄바꿈을 유지하는) 조건 — index.html 의 formatBodyText() 와 같은 규칙
+BODY_SENT_END = re.compile(r"(?:[.?!:;。…~]|다|요|니다|바랍니다|드립니다|세요|함|임|음|\))\s*$")
+BODY_LIST_HEAD = re.compile(r"^\s*(?:[-*•·○◦▶▪※#>]|\(?\d{1,2}[).]\s|[①-⑳]|[가-힣]\.\s)")
+BODY_LABEL_HEAD = re.compile(r"^\s*[가-힣A-Za-z][^:\n]{0,11}\s*[:：]\s*\S")
+BODY_QUOTE_HEAD = re.compile(
+    r"^\s*(?:from|sent|to|cc|bcc|subject|date|보낸\s*사람|받는\s*사람|참조|제목|보낸\s*날짜)\s*[:：]", re.I)
+BODY_URL_RE = re.compile(r"(?:https?://|www\.)\S", re.I)
+BODY_ADDR_LINE = re.compile(r"^[^\n]{0,20}(?:대리|과장|차장|부장|사원|팀장|대표|님|제위)\s*[,.]?$")
+BODY_MARK_LINE = re.compile(r"^\s*(?:—|–|-{2,}|={2,})")
+BODY_SIG_MARK = re.compile(r"^—\s*서명\s*—")
+BODY_UNIT_TAIL = re.compile(r"^[월일년시분초대개건명원층호차%]")
+BODY_CELL_GAP = "  "          # 표 행 — <td> 칸 사이는 두 칸 공백
+
+
+def _body_keeps_break(prev: str, cur: str) -> bool:
+    """앞 줄과 이어 붙이지 않고 줄바꿈을 유지해야 하는가."""
+    if not prev:
+        return True
+    if BODY_CELL_GAP in prev or BODY_CELL_GAP in cur:              # 표 행
+        return True
+    if BODY_SENT_END.search(prev):                                 # 문장이 끝났다
+        return True
+    if BODY_LIST_HEAD.match(cur) or BODY_LABEL_HEAD.match(cur):    # 새 항목·`품번:` 라벨
+        return True
+    if BODY_QUOTE_HEAD.match(cur) or BODY_MARK_LINE.match(cur) or BODY_MARK_LINE.match(prev):
+        return True                                               # 인용 헤더·서명/인용 구분선
+    if BODY_URL_RE.search(cur):                                    # 주소
+        return True
+    if BODY_ADDR_LINE.match(prev) or BODY_ADDR_LINE.match(cur):   # 인사·수신인 호칭
+        return True
+    return False
+
+
+def _body_join(prev: str, cur: str) -> str:
+    if re.search(r"\d$", prev) and BODY_UNIT_TAIL.match(cur):
+        return prev + cur                                          # 11 + 월 → 11월
+    return prev + " " + cur
+
+
+def join_body_text(text: str) -> str:
+    """문장 중간에 끊긴 줄을 이어 붙인다 (\\x01 · \\x02 는 진짜 줄바꿈으로 살린다).
+
+    `하기 품번 명일\\n07:00\\n기준 재고실사 요청드립니다` → `하기 품번 명일 07:00 기준 재고실사 요청드립니다`
+    빈 줄(단락)·글머리표·라벨·URL·인용 헤더·서명·인사 호칭·표 행은 그대로 둔다.
+    """
+    out: list[str] = []
+    in_sig = False
+    hard = True
+    for piece in re.split(r"([\n\x01\x02])", str(text or "").replace(HARD_PARA, "\n\n")):
+        if piece in ("\n", HARD_BR, HARD_ROW):
+            hard = piece != "\n"
+            continue
+        line = re.sub(r"[ \t\u200b\ufeff]+$", "", re.sub(r"^[ \t\u200b\ufeff]+", "", piece))
+        line = re.sub(r"[ \t]{2,}", BODY_CELL_GAP, line).rstrip()
+        if not line:
+            in_sig = False
+            if out and out[-1] != "":
+                out.append("")                                     # 빈 줄은 한 번만
+            continue
+        prev = out[-1] if out else ""
+        if prev and not hard and not in_sig and not _body_keeps_break(prev, cur=line):
+            out[-1] = _body_join(prev.rstrip(), line)
+        else:
+            out.append(line)
+        if BODY_SIG_MARK.match(line):
+            in_sig = True                                          # 서명 블록은 줄을 그대로 둔다
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _one_break(m: "re.Match[str]") -> str:
+    """붙어 있는 줄바꿈 표시를 하나로 줄인다 — <div> 닫힘 + 다음 <div> 열림의 이중 \\n 정리."""
+    s = m.group(0)
+    br = s.count(HARD_BR)
+    if HARD_PARA in s or br >= 2:
+        return "\n\n"                                              # 빈 블록·<br><br> 는 단락
+    if HARD_ROW in s:
+        return HARD_ROW
+    if br == 1:
+        return HARD_BR
+    return "\n"
+
+
 def el_text(el: Any) -> str:
-    """본문 요소 → 글자 — 블록 경계에서만 줄을 바꾸고 인라인 조각은 붙여 쓴다.
+    """본문 요소 → 글자 — 인라인 조각은 붙여 쓰고, 블록 경계는 이어 붙일 수 있는 줄바꿈으로 남긴다.
 
     `<div><span>11</span>월 <span>24</span>일</div>` → `11월 24일`
-    `<div>첫 줄</div><div>둘째 줄</div>` → `첫 줄\n둘째 줄`
+    `<p>하기 품번 명일</p><p>07:00</p><p>기준 재고실사 요청드립니다</p>`
+        → `하기 품번 명일 07:00 기준 재고실사 요청드립니다`
+    `<br>` 는 진짜 줄바꿈으로 남기고, 표 `<tr>` 행은 `\\n`, `<td>` 칸은 ` ` 공백으로 유지한다.
     """
     parts: list[str] = []
 
@@ -1358,33 +1449,34 @@ def el_text(el: Any) -> str:
         name = name.lower()
         if name in SKIP_TAGS:
             return
+        if name == "br":
+            parts.append(HARD_BR)                         # <br> 은 진짜 줄바꿈
+            return
+        if name == "tr":
+            parts.append(HARD_ROW)                        # 표 행 경계
+            for child in node.children:
+                walk(child)
+            parts.append(HARD_ROW)
+            return
         block = name in BLOCK_TAGS
-        if block:
-            parts.append("\n")
+        # 글자 없는 빈 블록(<div><br></div>)은 단락 구분으로 본다
+        brk = (HARD_PARA if not node.get_text(strip=True) else "\n") if block else None
+        if brk:
+            parts.append(brk)
         elif name in CELL_TAGS:
             parts.append(" ")
         if name not in VOID_TAGS:
             for child in node.children:
                 walk(child)
-        if block:
-            parts.append("\n")
+        if brk:
+            parts.append(brk)
         elif name in CELL_TAGS:
             parts.append(" ")
 
     walk(el)
     raw = "".join(parts).replace("\u00a0", " ")
-    out: list[str] = []
-    for line in raw.split("\n"):
-        line = re.sub(r"[ \t\u200b\ufeff]+$", "", re.sub(r"^[ \t\u200b\ufeff]+", "", line))
-        line = re.sub(r"[ \t]{2,}", "  ", line).rstrip()
-        if not line:
-            if not out or not out[-1]:                # 빈 줄은 한 번만
-                out.append("")
-                continue
-            continue
-        out.append(line)
-    return "\n".join(out).strip()
-
+    raw = re.sub(r"[\n\x01\x02\x03]+", _one_break, raw)
+    return join_body_text(raw).strip()
 
 
 def clean_body(text: str) -> str:
@@ -1576,7 +1668,18 @@ SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성�
 - 해외물류부 영역(항공/해상 B/L, 선적 부킹, 포워더, 통관, 선복)은 담당이 아니므로 actionItems 에서 제외한다.
 
 [summary 작성 규칙]
-- "이슈 → 진행 → 결론/남은 일"이 1~4문장으로 드러나게 쓴다.
+- **본문 첫 줄이나 인사말을 그대로 옮기지 않는다.** "○○님," · "요청드립니다" · "안녕하십니까" 같은 문장이
+  summary 에 남아 있으면 잘못 쓴 것이다. (예: 본문이 "피세영 대리님, 하기 품번 명일 07:00 기준 재고실사
+  요청드립니다"인데 summary 도 같은 문장이면 실패)
+- **반드시 제3자 보고체 1~2문장으로 쓴다**: 누가(소속·이름·직급) → 누구에게 → 무슨 사유/품번으로 →
+  언제까지 무엇을 요청·공유·제출하는지.
+  예) "GM 염주희 차장이 납입·해외물류부에 MY26 EOP 자재 입항지연으로 11/24 07:00 기준 재고파악을 요청한 건"
+  예) "사내 해외물류부 류광종 과장이 납입1팀에 11/24 07:00 기준 2품번(13524683·13540045) 재고실사 자료
+  회신을 요청한 건"
+- 소속 표기: 보낸 사람 주소가 @gm.com 이면 "GM", @chunil.co.kr 이면 "사내"(서명·본문에 부서가 있으면
+  "해외물류부" 처럼 그 부서). 받는 사람은 [받는사람] 의 첫 사람·팀을 "누구에게"로 쓴다.
+- 그 뒤에 필요한 사실(품번·수량·기한·진행 상태·남은 일)만 덧붙인다. "이슈 → 진행 → 남은 일"은
+  필요할 때 2번째 문장부터 쓴다.
 - 수신인·참조 설명("수신 A·B(To)", "김성규 과장은 참조", "내 조치 없음")은 쓰지 않는다. 수신 정보는 별도 필드로 저장된다.
 - 날짜·품번·수량·기한 같은 사실은 원문 그대로 옮긴다. 추측은 "확인 필요"로 표시한다.
 - 본문이 리스트·표 위주면 무엇이 몇 건인지, 회신이 필요한지만 한 줄로 압축한다.
@@ -1716,7 +1819,204 @@ def strip_greeting(text: str) -> str:
     return s.strip()
 
 
-def heuristic_analysis(mail: dict, to_me: bool) -> dict:
+# ── 3인칭 요약용 조각 — 휴리스틱도 "누가 → 누구에게 → 무엇을" 로 쓴다 (v1.2.7)
+ACTION_PATTERNS = (
+    ("회신", r"회신|답변|회답"),
+    ("제출", r"제출"),
+    ("송부", r"송부|발송|전달"),
+    ("확인", r"확인\s*(?:요청|부탁|바랍니다|해\s*주)"),
+    ("요청", r"요청|부탁|요망|협조"),
+    ("공유", r"공유|안내|공지|알림"),
+)
+ACTION_PHRASE = {
+    "요청": "{t}{o} 요청하는 내용임",
+    "회신": "{t} 회신을 요청하는 내용임",
+    "제출": "{t} 제출을 요청하는 내용임",
+    "송부": "{t}{o} 송부한 내용임",
+    "확인": "{t}{o} 확인 요청하는 내용임",
+    "공유": "{t}{o} 공유한 내용임",
+    "안내": "{t}{o} 안내한 내용임",
+    "전달": "{t}{o} 전달한 내용임",
+}
+REL_DAYS = ((r"명일|내일|익일", 1), (r"금일|오늘|당일|금일중", 0), (r"전일|어제|작일", -1))
+FILLER_HEAD = re.compile(r"^(?:하기|아래|다음|상기|위|첨부|동봉|하기와\s*같이|하기와\s*같은)\s*(?:품번|품목|건|사항|자료|내용|안)?\s*")
+REASON_WORDS = re.compile(r"EOP|PTR|LLLL?P|결품|지연|부족|과다|사고|불량|변경|긴급|추가|회수|격리")
+
+
+def _josa(word: str, with_batchim: str, without: str) -> str:
+    w = (word or "").strip()
+    if not w:
+        return without
+    code = ord(w[-1])
+    if 0xAC00 <= code <= 0xD7A3:
+        return with_batchim if (code - 0xAC00) % 28 else without
+    return without
+
+
+def _addr_name(raw: str) -> str:
+    s = re.sub(r"<[^>]*>", "", raw or "").replace('"', "")
+    s = re.sub(r"\s*\((?:C|T|B|CC|TO|To|Cc)\)\s*$", "", s.strip())
+    return s.strip(" ,;")
+
+
+def _sender_phrase(mail: dict, contacts: dict | None) -> str:
+    email = (mail.get("from_email") or _addr_email(mail.get("from_raw") or "")).lower()
+    raw = mail.get("from_raw") or ""
+    name, title, org = _sender_parts(raw, email, contacts or {})
+    if not org:
+        gm = email.endswith("@gm.com") or "(gm)" in raw.lower()
+        org = "GM" if gm else ("사내" if (email or name) else "")
+    name = _clean(name)
+    if title and title not in name:
+        name = f"{name} {title}".strip()
+    return " ".join(x for x in (org, name) if x) or "발신자"
+
+
+def _recipient_phrase(mail: dict, contacts: dict | None, to_me: bool) -> str:
+    """`피세영 대리에게` — 받는사람(To) 첫 사람. 나만 있으면 `나에게`."""
+    people: list[tuple[str, str]] = []
+    me = (ME or str(OWNER.get("email") or "")).lower()
+    for raw in mail.get("to") or []:
+        email = _addr_email(raw)
+        if email and email == me:
+            continue
+        info = (contacts or {}).get(email) or {}
+        name = _clean(info.get("name") or "") or _addr_name(raw)
+        if not name:
+            continue
+        people.append((name, _clean(info.get("title") or "")))
+    if not people:
+        return "나에게" if to_me else "수신 담당자에게"
+    name, title = people[0]
+    who = f"{name} {title}".strip() if title and title not in name else name
+    rest = len(people) - 1
+    return f"{who}{_josa(who, '에게', '에게')}" + (f" 외 {rest}명에게" if rest else "")
+
+
+def _rel_date(text: str, ref: str) -> str:
+    """`명일`·`오늘` 같은 상대 날짜를 받은 날짜 기준 `11/24` 로."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(ref or ""))
+    if not m:
+        return ""
+    try:
+        base = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return ""
+    for pat, delta in REL_DAYS:
+        if re.search(pat, text):
+            d = base + dt.timedelta(days=delta)
+            return f"{d.month}/{d.day}"
+    return ""
+
+
+def _gist_clause(body: str, title: str, ref: str) -> tuple[str, str]:
+    """요청 문장에서 (무엇을, 행동) 을 뽑는다 → ("11/24 07:00 기준 재고실사", "요청")."""
+    text = join_body_text(clean_body(body or ""))
+    for line in text.split("\n"):
+        s = _clean(line.replace(HARD_BR, " ").replace(HARD_ROW, " "))
+        if len(s) < 3 or BODY_CELL_GAP in s or BODY_ADDR_LINE.match(s):
+            continue
+        for verb, pat in ACTION_PATTERNS:
+            hits = list(re.finditer(pat, s))
+            if not hits:
+                continue
+            m = hits[-1]                   # 같은 줄에 동사가 두 번 나오면 뒤엣것(마지막 지시)을 기준으로
+            head = s[: m.start()].strip(" ,.;:·-—–")
+            head = re.sub(r"^(?:제출|회신|보고|마감)\s*(?:기한|일|일자)\s*[:：]?\s*", "", head).strip()
+            head = re.sub(r"^[^\n]{0,14}?(?:대리|과장|차장|부장|사원|팀장|님)\s*[,.]?\s*", "", head)
+            head = re.sub(r"^(?:수신자?|참조)\s*제위\s*[,.]?\s*", "", head)
+            head = FILLER_HEAD.sub("", head).strip()
+            day = _rel_date(s, ref)
+            if day:
+                head = re.sub(r"^(?:명일|내일|익일|금일|오늘|당일|전일|어제|작일)\s*", day + " ", head)
+            head = re.sub(r"\s{2,}", " ", head).strip(" ,.;:·-—–")
+            if len(head) >= 2:
+                return head[:70], verb
+            # 머리말이 없으면("확인 부탁드립니다") 동사 낱말만 주제로 — 일반적인 "요청/부탁" 은 건너뛴다
+            word = re.sub(r"\s*(?:부탁|요청|요망|협조|드립니다|합니다|바랍니다)", "", _clean(m.group(0))).strip()
+            if word and word not in ("요청", "부탁", "협조", "요망", "회신", "제출", "송부", "공유", "안내", "전달"):
+                return word[:20], verb
+            break
+    # 요청 문장을 못 찾으면 제목으로
+    t = re.sub(r"^\s*(?:re|fw|fwd|답장|전달)\s*[:：]\s*", "", _clean(title), flags=re.I)
+    t = re.sub(r"^\[[^\]]{1,12}\]\s*", "", t).strip()
+    verb = "전달"
+    for v, pat in ACTION_PATTERNS:
+        if re.search(pat, t):
+            verb = v
+            break
+    return (t[:70] or ""), verb
+
+
+def _reason_clause(body: str) -> str:
+    """`(MY26 EOP 자재로 입항지연 예상 )` 같은 괄호 사유 한 조각."""
+    for m in re.finditer(r"\(([^()\n]{6,60})\)", body or ""):
+        s = _clean(m.group(1)).strip(" ,.;:·-—–")
+        if REASON_WORDS.search(s):
+            return s
+    return ""
+
+
+def third_person_summary(mail: dict, contacts: dict | None = None, to_me: bool = False) -> tuple[str, str]:
+    """휴리스틱 3인칭 요약 → (summary, threadGist). 본문을 그대로 옮기지 않는다."""
+    body = mail.get("bodyText") or ""
+    title = mail.get("subject") or ""
+    ref = mail.get("date") or mail.get("receivedAt") or ""
+    who = _sender_phrase(mail, contacts)
+    rcpt = _recipient_phrase(mail, contacts, to_me)
+    topic, verb = _gist_clause(body, title, ref)
+    if not topic:
+        return "", ""
+    obj = _josa(topic, "을", "를")
+    if topic.rstrip().endswith(verb):          # 주제가 이미 동사로 끝나면("제출") 겹쳐 쓰지 않는다
+        phrase = f"{topic}{obj} 요청하는 내용임" if verb in ("요청", "회신", "제출", "확인") else f"{topic}{obj} 한 내용임"
+    else:
+        phrase = ACTION_PHRASE.get(verb, ACTION_PHRASE["전달"]).format(t=topic, o=obj)
+    summary = f"{who}{_josa(who, '이', '가')} {rcpt} {phrase}"
+    reason = _reason_clause(body)
+    if reason and reason not in summary:
+        summary += f" — {reason}"
+    if len(summary) > 220:
+        summary = summary[:218].rstrip() + "…"
+    gist = (topic if topic.rstrip().endswith(verb) else f"{topic} {verb}").strip()[:60]
+    return summary, gist
+
+def _looks_copied_summary(summary: str, body: str) -> bool:
+    """예전 휴리스틱이 본문 앞부분을 그대로 잘라 넣은 요약인가."""
+    s = re.sub(r"\s+", "", summary or "")
+    if len(s) < 20:
+        return False
+    for cand in (body or "", strip_greeting(body or "")):
+        b = re.sub(r"\s+", "", cand)
+        if b and b.startswith(s):
+            return True
+    return False
+
+
+def refresh_copied_summaries(items: list[dict], contacts: dict | None = None) -> int:
+    """이미 쌓인 메일 중 '본문 복붙' 요약을 3인칭 요약으로 바꾼다 (v1.2.7).
+
+    AI 가 쓴 요약처럼 본문 앞부분과 같지 않은 요약은 건드리지 않는다.
+    """
+    n = 0
+    for it in items or []:
+        body = it.get("bodyText") or ""
+        cur = it.get("summary") or ""
+        if not _looks_copied_summary(cur, body):
+            continue
+        mail = {"subject": it.get("title") or "", "bodyText": body,
+                "date": it.get("receivedAt") or "",
+                "from_raw": it.get("sender") or "", "from_email": it.get("senderEmail") or "",
+                "to": it.get("to") or [], "cc": it.get("cc") or []}
+        summary, _gist = third_person_summary(mail, contacts, it.get("recipientRole") == "To")
+        if summary and summary != cur:
+            it["summary"] = summary
+            n += 1
+    return n
+
+
+
+def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None) -> dict:
     body = clean_body(mail.get("bodyText") or "")
     core = strip_greeting(body) or body          # 인사말·소속 소개는 요약에서 뺀다
     first = _clean(core)[:280]
@@ -1729,8 +2029,9 @@ def heuristic_analysis(mail: dict, to_me: bool) -> dict:
         if key.lower() in (title + body).lower():
             cat = c
             break
+    summary, gist = third_person_summary(mail, contacts, to_me)
     return {
-        "summary": first or title,
+        "summary": summary or first or title,
         "actionItems": [],
         "dueDate": due,
         "deadline": (deadline_label(due) if due
@@ -1738,7 +2039,7 @@ def heuristic_analysis(mail: dict, to_me: bool) -> dict:
         "replyStatus": "needs_reply" if to_me else "no_reply_needed",
         "category": cat,
         "urgency": "normal",
-        "threadGist": (first or title)[:60],
+        "threadGist": gist or (first or title)[:60],
         "tags": [],
         "replyDrafts": None,
     }
@@ -1975,14 +2276,14 @@ def sync(args: argparse.Namespace) -> dict:
 
     def analyze(mail: dict, kind: str) -> dict:
         if gem is None:
-            return heuristic_analysis(mail, _is_to(mail))
+            return heuristic_analysis(mail, _is_to(mail), contacts)
         try:
             report["gemini_calls"] += 1
             return gem.analyze(mail, kind=kind)
         except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
             # 로그가 공개될 수 있으므로 메일 제목·본문은 오류 문구에 넣지 않는다
             report["warnings"].append(f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}: {str(e)[:200]}")
-            return heuristic_analysis(mail, _is_to(mail))
+            return heuristic_analysis(mail, _is_to(mail), contacts)
 
     added = 0
     title_sent: list[str] = []
@@ -2017,7 +2318,10 @@ def sync(args: argparse.Namespace) -> dict:
         if hit:
             report["replied"].append({"sent_mf_no": row["mf_no"], "target": hit["id"], "subject": detail["subject"][:60]})
 
-    changed = bool(added or report["replied"] or contacts_added or inferred
+    refreshed = refresh_copied_summaries(items, contacts)   # 예전 '본문 복붙' 요약 → 3인칭 (v1.2.7)
+    if refreshed:
+        report["summariesRefreshed"] = refreshed
+    changed = bool(refreshed or added or report["replied"] or contacts_added or inferred
                    or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
