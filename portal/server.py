@@ -932,6 +932,8 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         if sm.ensure_owner_title(board):
             owner_box = {k: sm.OWNER.get(k) for k in ("name", "title", "dept", "company", "email")}
             update_user_meta(uid, owner=owner_box)
+            # 신규 메일이 없어 아래에서 바로 끝나도 직급이 남도록 지금 저장한다
+            atomic_write_json(board_path, board, mode=0o600)
             print(f"[sync] {uid} 직급 자동 추론 — {sm.OWNER.get('name')} {sm.OWNER.get('title')}", flush=True)
 
         # ── 새 메일
@@ -947,11 +949,10 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             sent = sent[: CFG["max_new"]]
 
         if not inbox and not sent and not first:
-            out = public_status(uid)
             set_status(uid, state="ready", phase="done", progress=100,
                        message="새 메일 없음 — 최신 상태입니다", lastSync=board.get("updatedAt"),
                        _persist=True)
-            return out
+            return public_status(uid)      # set_status 이후 상태를 돌려준다(syncing 이 아니라)
 
         gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"]) if CFG["gemini_key"] else None
         report: dict[str, Any] = {"gemini_calls": 0, "warnings": []}

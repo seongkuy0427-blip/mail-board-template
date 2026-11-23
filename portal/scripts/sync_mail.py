@@ -1606,7 +1606,7 @@ def sync(args: argparse.Namespace) -> dict:
     report["new_inbox"] = [{"mf_no": m["mf_no"], "subject": m["subject"], "receivedAt": m["receivedAt"]} for m in inbox]
     report["new_sent"] = [{"mf_no": m["mf_no"], "subject": m["subject"], "receivedAt": m["receivedAt"]} for m in sent]
 
-    if not inbox and not sent and not is_new and not contacts_added:
+    if not inbox and not sent and not is_new and not contacts_added and not inferred:
         report["changed"] = False
         return report
 
@@ -1656,7 +1656,7 @@ def sync(args: argparse.Namespace) -> dict:
         if hit:
             report["replied"].append({"sent_mf_no": row["mf_no"], "target": hit["id"], "subject": detail["subject"][:60]})
 
-    changed = bool(added or report["replied"] or contacts_added
+    changed = bool(added or report["replied"] or contacts_added or inferred
                    or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
