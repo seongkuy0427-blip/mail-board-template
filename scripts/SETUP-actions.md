@@ -25,7 +25,7 @@ GitHub → 내 저장소 → **Settings → Secrets and variables → Actions �
 | `GEMINI_API_KEY` | 공유받은 Gemini API 키 (또는 Google AI Studio 에서 발급) |
 | `MAILBOARD_PIN` | 대시보드 로그인 비밀번호 (내가 정하는 숫자·문자, 잊으면 암호문을 열 수 없습니다) |
 
-선택 사항(**Settings → Variables**): `GEMINI_MODEL`(기본 `gemini-2.5-flash`), `NMAIL_IP_CHECK`(기본 `1`).
+선택 사항(**Settings → Variables**): `GEMINI_MODEL`(기본 `gemini-3.8-flash`), `NMAIL_IP_CHECK`(기본 `1`).
 
 ## 2. 워크플로우 파일 만들기 (필수)
 

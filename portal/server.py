@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1306,6 +1306,9 @@ def similar_error_message(e: BaseException) -> str:
             "name or service not known", "temporary failure", "unreachable",
             "ssl", "proxy", "remotedisconnected", "connectionreset")):
         return "Gemini 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+    if 404 in codes or "no longer available" in text or ("model" in text and "not found" in text):
+        return ("Gemini 모델(404) 설정을 확인해 주세요. 사용하던 모델이 종료되었을 수 있습니다 "
+                f"(현재 {sm.DEFAULT_MODEL} — 서버 .env 의 GEMINI_MODEL).")
     return f"AI 분석에 실패했습니다({type(e).__name__}). 잠시 후 다시 시도해 주세요."
 
 

@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import sys
 import tempfile
 
@@ -304,7 +305,7 @@ def args_for(data_enc: str) -> argparse.Namespace:
     return argparse.Namespace(data_enc=data_enc, out=None, dry_run=False, max_pages=2, max_new=40,
                               thread_merge=True, track_replies=True, images=False, dump_dir=None,
                               chunil_id="kimtest", chunil_pw="x", ip_check="1",
-                              gemini_key="fake-key", gemini_model="gemini-2.5-flash",
+                              gemini_key="fake-key", gemini_model=sm.DEFAULT_MODEL,
                               seed_days=14, seed_max=30, board_config=None, refresh_contacts=False)
 
 
@@ -559,6 +560,61 @@ def run(pin: str, keep: bool) -> int:
           any(it["id"] == f"m-{n9}" for it in after.get("items") or []) and after.get("contacts") == [],
           f"items={len(after.get('items') or [])}")
 
+    # 로고·슬로건·서명 제외 (v1.2.4) — 인라인 이미지와 본문 문구
+    logo_html = read_page(date="2026-11-23 12:00", frm='"김수현" <suhyun@chunil.co.kr>',
+                          to=["김성규 <kimpro@chunil.co.kr>"], cc=[], subject="로고 제외 확인",
+                          body='<div>현장 사진 첨부드립니다.</div>'
+                               '<div><img src="/include/download.php?name=image001.png&amp;key=1" width="400" alt=""></div>'
+                               '<div id="signature"><img src="/include/download.php?name=photo.png" width="800" height="600" alt=""></div>'
+                               '<div><img src="/include/download.php?name=slogan_banner.png" width="600" height="100" alt=""></div>'
+                               '<div><img src="/include/download.php?name=work_table.png" width="1500" height="273" alt=""></div>')
+    imgs = [x["src"].split("name=")[1].split("&")[0] for x in sm.parse_read(logo_html)["images"]]
+    check("로고·슬로건·서명 이미지 제외", imgs == ["image001.png", "work_table.png"], str(imgs))
+    sign_body = ("하기 11/24(화) 07:00 기준 EOP자재 재고실사 결과와 재고 수량 변동 내역을 송부드립니다.\n"
+                 "첨부 자료 확인 부탁드립니다.\n\n"
+                 "천일정기화물자동차 (주)\nSCM사업본부 자동차물류사업부 납입1팀 과장 김성규\n"
+                 "주소 : 인천 부평구 부평대로 233 · TEL 032-330-2233 · Fax 032-330-3443\n"
+                 "본 메일은 지정된 수신인에게만 수신이 허용됩니다.")
+    cleaned = sm.clean_body(sign_body)
+    check("본문 서명·면책 문구 제거",
+          "재고실사 결과" in cleaned and not any(k in cleaned for k in ("TEL", "Fax", "지정된 수신인", "천일정기화물자동차 (주)")),
+          repr(cleaned[-80:]))
+
+    class _ImgSource:
+        def fetch_bytes(self, url, *, cap=400_000):
+            return b"\x89PNG\r\n\x1a\n" + (b"0" * (6_000 if "logo" in url else 90_000))
+
+    got_imgs = sm.collect_images(_ImgSource(), [{"src": "/logo.png"}, {"src": "/photo.png"}], {})
+    check("12KB 미만 이미지 제외",
+          sm.IMG_MIN_BYTES == 12_000 and len(got_imgs) == 1
+          and got_imgs[0]["dataUrl"].startswith("data:image/png;base64,"),
+          f"min={sm.IMG_MIN_BYTES} kept={len(got_imgs)}")
+
+
+    def _png(w, h, pad=9_000):
+        return (b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
+                + struct.pack(">II", w, h) + b"\x08\x02\x00\x00\x00" + b"\x00\x00\x00\x00" + b"0" * pad)
+
+    class _BannerSource:
+        def __init__(self, blobs):
+            self.blobs = blobs
+
+        def fetch_bytes(self, url, *, cap=400_000):
+            return self.blobs.get(url)
+
+    banner, photo = _png(500, 80), _png(900, 674, pad=90_000)      # 500x80 = 'Hi CHUNIL, High green'
+    kept = sm.collect_images(_BannerSource({"b1": banner, "b2": banner, "b3": banner,
+                                            "p1": photo, "p2": photo}),
+                             [{"src": s} for s in ("b1", "b2", "b3", "p1", "p2")], {})
+    check("슬로건 배너·중복 이미지 제외", len(kept) == 1, f"kept={len(kept)}")
+    greet = sm.heuristic_analysis({"subject": "통합배차", "bodyText": (
+        "안녕하십니까 ?\n천일정기화물자동차㈜ 조달물류팀 최재훈 입니다 .\n"
+        "수신자 제위\n2026년 11월 24일 통합배차 송부드립니다 .")}, False)
+    check("휴리스틱 요약에서 인사말 제외",
+          greet["summary"].startswith("2026년") and "안녕하십니까" not in greet["summary"],
+          greet["summary"][:60])
+
+    check("기본 Gemini 모델", sm.DEFAULT_MODEL == "gemini-3.8-flash", sm.DEFAULT_MODEL)
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)

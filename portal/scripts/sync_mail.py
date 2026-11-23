@@ -27,7 +27,7 @@ GitHub Actions 러너에서 30분마다 돌아,
  CHUNIL_PW        웹메일 비밀번호
  GEMINI_API_KEY   Google AI Studio(또는 사내 공유) API 키
  MAILBOARD_PIN    대시보드 복호화 PIN (대시보드 로그인 비밀번호)
- GEMINI_MODEL     (선택) 기본 gemini-2.5-flash
+ GEMINI_MODEL     (선택) 기본 gemini-3.8-flash
  NMAIL_IP_CHECK   (선택) IP보안접속 값. 기본 1
  BOARD_CONFIG     (선택) 설정 파일 경로. 기본 <저장소>/board_config.json
 
@@ -46,9 +46,11 @@ import argparse
 import base64
 import datetime as dt
 import gzip
+import hashlib
 import json
 import os
 import re
+import struct
 import sys
 import time
 import unicodedata
@@ -112,7 +114,28 @@ TITLE_WORDS = ("과장보", "부사장", "본부장", "상무", "전무", "이�
                "수석", "책임", "선임", "매니저", "프로", "조장")
 SHIP_KEYWORDS = ("선적", "b/l", "bl no", "항공", "해상", "통관", "해외물류", "asn", "수출", "수입", "부킹", "bl ")
 QUOTE_MARKERS = ("보낸 사람:", "보낸사람:", "-----original", "from:", "sent:", "________________________________")
-DEFAULT_MODEL = "gemini-2.5-flash"
+
+
+# ────────────────────────────────────────────────────────────── 로고·서명 이미지 제외
+#  회사 메일은 서명에 로고·CI·슬로건 배너·SNS 아이콘을 따라 붙인다. 이걸 본문 사진으로
+#  세거나 Gemini 에 넘기면 "회사 로고입니다" 같은 의미 없는 분석이 붙고, 대시보드 본문에도
+#  사진이 늘어난다. 그래서 ① 서명·인용 영역 안 ② 파일명/대체텍스트가 로고류
+#  ③ 크기가 아이콘·가로 배너 ④ 내려받은 바이트가 12KB 미만 — 네 가지로 거른다.
+SIGN_AREA_HINTS = ("sign", "signature", "sig", "gmail_quote", "gmail_signature", "footer")
+SIGN_IMG_HINTS = ("logo", "ci", "sign", "signature", "slogan", "banner", "footer", "header",
+                  "icon", "spacer", "btn", "button", "pixel", "tracking",
+                  "로고", "슬로건", "서명", "엠블럼")
+SHORT_HINTS = {"ci", "btn", "sig"}      # 3글자 이하 약어는 낱말 경계에서만('ascii'·'decision' 오인 방지)
+SIGN_IMG_MIN_W = 120                    # 이보다 좁으면 구분선·아이콘
+SIGN_IMG_MIN_H = 60                     # 이보다 낮으면 띠 모양 배너
+SIGN_IMG_BANNER_H = 120                 # 높이 120 이하면서 가로가 세로의 4배 이상이면 가로 배너
+IMG_MIN_BYTES = 12_000                  # 12KB 미만 — 로고·아이콘·추적 픽셀
+#  내려받은 바이트의 **실제 픽셀 크기** 기준(서명에 붙는 'Hi CHUNIL, High green' 가로 배너 등)
+IMG_SMALL_W = 130                       # 이보다 좁으면 소형 아이콘
+IMG_SMALL_H = 70                        # 이보다 낮으면 소형 아이콘·구분선
+IMG_BANNER_H = 140                      # 높이 140 이하에서
+IMG_BANNER_RATIO = 2.5                  # 가로가 세로의 2.5배 이상이면 가로형 슬로건·서명 배너
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 # ────────────────────────────────────────────────────────────── 암호 (build_data.py 와 동일 형식)
@@ -1048,6 +1071,122 @@ def _header_map(soup: BeautifulSoup) -> dict[str, Any]:
     return out
 
 
+def _img_px(value) -> int | None:
+    """`width="120"` · `width="120px"` → 120. `100%`·빈 값은 None(크기를 단정하지 않는다)."""
+    m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$", str(value or ""), re.I)
+    return int(float(m.group(1))) if m else None
+
+
+def _img_size(img) -> tuple[int | None, int | None]:
+    """HTML width/height 속성 또는 인라인 style 에서 픽셀 크기를 읽는다."""
+    w, h = _img_px(img.get("width")), _img_px(img.get("height"))
+    style = str(img.get("style") or "")
+    if w is None:
+        m = re.search(r"width\s*:\s*(\d+(?:\.\d+)?)\s*px", style, re.I)
+        w = int(float(m.group(1))) if m else None
+    if h is None:
+        m = re.search(r"height\s*:\s*(\d+(?:\.\d+)?)\s*px", style, re.I)
+        h = int(float(m.group(1))) if m else None
+    return w, h
+
+
+def _hint_hit(text: str, hints: tuple[str, ...]) -> bool:
+    low = str(text or "").lower()
+    if not low:
+        return False
+    for hint in hints:
+        if hint in SHORT_HINTS:
+            if re.search(rf"(?<![a-z]){re.escape(hint)}(?![a-z])", low):
+                return True
+        elif hint in low:
+            return True
+    return False
+
+
+def _in_sign_area(img) -> bool:
+    """인용·서명 컨테이너 안의 이미지인가 (`[id*=sign]`·`[class*=sign]`·blockquote·gmail_quote)."""
+    for parent in img.parents:
+        name = getattr(parent, "name", None)
+        if not name:
+            break
+        if name in ("body", "html"):
+            break
+        if name == "blockquote":
+            return True
+        tokens = [parent.get("id") or ""] + list(parent.get("class") or [])
+        for token in tokens:
+            for part in re.split(r"[\s_\-.]+", str(token).lower()):
+                if part in SIGN_AREA_HINTS:
+                    return True
+    return False
+
+
+def is_signature_image(img) -> bool:
+    """본문 사진이 아니라 로고·CI·슬로건·아이콘·서명 이미지인가."""
+    if _in_sign_area(img):
+        return True
+    if _hint_hit(str(img.get("src") or "") + " " + str(img.get("alt") or ""), SIGN_IMG_HINTS):
+        return True
+    w, h = _img_size(img)
+    if w is not None and w < SIGN_IMG_MIN_W:
+        return True
+    if h is not None and h < SIGN_IMG_MIN_H:
+        return True
+    if w and h and h <= SIGN_IMG_BANNER_H and w >= 4 * h:
+        return True
+    return False
+
+
+def image_size(blob: bytes) -> tuple[int, int] | None:
+    """PNG/GIF/JPEG/WebP 바이트에서 실제 (width, height) 를 읽는다(외부 라이브러리 없이)."""
+    try:
+        if blob[:8] == b"\x89PNG\r\n\x1a\n" and len(blob) >= 24:
+            w, h = struct.unpack(">II", blob[16:24])
+            return int(w), int(h)
+        if blob[:4] == b"GIF8" and len(blob) >= 10:
+            w, h = struct.unpack("<HH", blob[6:10])
+            return int(w), int(h)
+        if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP" and len(blob) >= 30:
+            if blob[12:16] == b"VP8X":                       # 확장 포맷 — 24비트 (크기-1)
+                w = int.from_bytes(blob[24:27], "little") + 1
+                h = int.from_bytes(blob[27:30], "little") + 1
+                return w, h
+            if blob[12:16] == b"VP8L":                       # 무손실 — 14비트씩
+                b = int.from_bytes(blob[21:25], "little")
+                return (b & 0x3FFF) + 1, ((b >> 14) & 0x3FFF) + 1
+        if blob[:2] == b"\xff\xd8":
+            i, n = 2, len(blob)
+            while i + 9 < n:
+                if blob[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = blob[i + 1]
+                if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7 or marker == 0xFF:
+                    i += 2 if marker != 0xFF else 1
+                    continue
+                seg = struct.unpack(">H", blob[i + 2:i + 4])[0]
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                              0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    h, w = struct.unpack(">HH", blob[i + 5:i + 9])
+                    return int(w), int(h)
+                i += 2 + seg
+    except (struct.error, IndexError, ValueError):
+        return None
+    return None
+
+
+def is_banner_or_icon(size: tuple[int, int] | None) -> bool:
+    """실제 픽셀 크기가 회사 슬로건 배너·서명 배너·소형 아이콘인가."""
+    if not size:
+        return False                    # 크기를 못 읽으면 사진으로 본다(내용을 잃지 않게)
+    w, h = size
+    if w <= IMG_SMALL_W or h <= IMG_SMALL_H:
+        return True                     # 작은 아이콘·구분선
+    if h <= IMG_BANNER_H and w >= IMG_BANNER_RATIO * h:
+        return True                     # 가로형 슬로건·서명 배너
+    return False
+
+
 def parse_read(html: str) -> dict:
     """편지읽기 페이지 → {date, from_raw, from_email, to[], cc[], subject, bodyText, attachments[], images[]}"""
     soup = BeautifulSoup(html, "html.parser")
@@ -1100,6 +1239,8 @@ def parse_read(html: str) -> dict:
                 src = BASE + src
             if not src.startswith("http"):
                 continue
+            if is_signature_image(img):
+                continue            # 회사 로고·CI·슬로건·아이콘·서명 이미지는 본문 사진이 아니다
             images.append({"src": src, "alt": _clean(img.get("alt", ""))})
 
     return {
@@ -1134,6 +1275,52 @@ def strip_quoted(text: str) -> str:
         if 0 < idx < cut:
             cut = idx
     return text[:cut].strip()
+
+
+# 본문 하단의 서명·슬로건·기밀 면책 — 줄 머리에서만 인정한다(본문 중간의 'Tel.' 오인 방지).
+SIGN_TEXT_PATTERNS = (
+    r"(?:gm\s*)?confidential",                       # GM Confidential · CONFIDENTIAL
+    r"본\s*메일은\s*지정된\s*수신인",                 # 국문 기밀 면책
+    r"본\s*메일.*(?:승인용도|사용할\s*수\s*없습니다)",   # 전자결재 면책
+    r"이\s*메일은\s*.*(?:수신인|대상으로)",
+    r"무단\s*전재",
+    r"무단\s*배포",
+    r"the\s*next\s*100",                             # 회사 슬로건
+    r"70\s*년의\s*경험",
+    r"천일정기화물자동차\s*(?:[\(（]\s*주\s*[\)）])?\s*$",   # 서명 첫 줄(회사명만 있는 줄)
+    # 연락처 — TEL : 032-... · Tel. +82 31 ... · Office Tel : ... · Mobile 010-...
+    r"(?:office\s*|cellular\s*|cell\s*|direct\s*)?(?:tel|fax|mobile|phone|hp)\s*\.?\s*[:：+]?\s*[\(\d+]",
+    r"(?:tel|fax|mobile|e-?mail)\s*\.?\s*[:：]?\s*$",          # 이름만 있는 줄(TEL / E-Mail)
+    r"e-?mail\s*[:：]",
+    r"(?:주소|사업장)\s*[:：].*(?:tel|fax|mobile).*(?:tel|fax|mobile)",   # 서명 한 줄에 주소·연락처가 다 붙은 경우
+)
+SIGN_TEXT_AFTER = 60            # 본문 앞 60자 안의 같은 낱말은 본문으로 본다
+
+
+def is_sign_text(line: str) -> bool:
+    low = re.sub(r"\s+", " ", str(line or "")).strip().lower()
+    return any(re.match(p, low) for p in SIGN_TEXT_PATTERNS)
+
+
+def strip_signature(text: str) -> str:
+    """본문 하단의 서명·슬로건·기밀 면책 문구를 잘라낸다.
+
+    - 줄 머리에서 시작하는 줄만 인정한다.
+    - 앞 SIGN_TEXT_AFTER 자 안에서는 건드리지 않는다(첫 줄이 면책 낱말로 시작해 통째로 날아가는 것 방지).
+    - 같은 낱말이 본문 중간에 나와도 그 줄이 앞머리가 아니면 그대로 둔다.
+    """
+    text = str(text or "")
+    pos = 0
+    for line in text.splitlines(keepends=True):
+        if pos >= SIGN_TEXT_AFTER and is_sign_text(line):
+            return text[:pos].strip()
+        pos += len(line)
+    return text.strip()
+
+
+def clean_body(text: str) -> str:
+    """분석·저장에 쓰는 본문 — 인용과 서명/슬로건/면책 문구를 걷어낸다."""
+    return strip_signature(strip_quoted(text or ""))
 
 
 def mentions_me(text: str) -> bool:
@@ -1296,9 +1483,30 @@ SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성�
 [tags] 품번·차종·키워드 0~5개."""
 
 
+def model_hint(text: str, *, current: str = "") -> str:
+    """API 오류문에서 '… models/gemini-X 를 쓰세요' 의 모델 이름을 뽑는다.
+
+    오류문에는 쓰던 모델('models/gemini-2.5-flash is no longer available')과 대체 모델
+    ('use models/gemini-3.8-flash')가 함께 나오므로, current 와 다른 첫 이름을 고른다.
+    """
+    names = re.findall(r"models/([a-zA-Z0-9._-]+)", text or "")
+    for name in names:
+        if name != current:
+            return name
+    return ""
+
+
 class Gemini:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, *, timeout: int = 90, retries: int = 3):
         self.key, self.model, self.timeout, self.retries = api_key, model, timeout, retries
+        self.switched = False           # 모델이 종료돼 다른 모델로 갈아탄 적이 있는지
+        self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model}:generateContent")
+
+    def _use_model(self, model: str) -> None:
+        """API 가 알려 준 대체 모델로 갈아탄다(설정을 고치지 않아도 계속 돌게)."""
+        print(f"  ! Gemini 모델 '{self.model}' 사용 불가 — '{model}' 로 전환합니다")
+        self.model, self.switched = model, True
         self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                     f"{model}:generateContent")
 
@@ -1317,6 +1525,11 @@ class Gemini:
                 if r.status_code in (429, 500, 502, 503, 504):
                     time.sleep(min(2 ** attempt, 20))
                     continue
+                if r.status_code == 404 and not self.switched:
+                    hint = model_hint(r.text, current=self.model)
+                    if hint:
+                        self._use_model(hint)
+                        continue        # 새 모델로 바로 다시 시도
                 raise GeminiError(last)
             time.sleep(min(2 ** attempt, 20))
         raise GeminiError(f"Gemini 요청 실패: {last}")
@@ -1333,7 +1546,7 @@ class Gemini:
         ]
         if mail.get("attachments"):
             lines.append("[첨부] " + ", ".join(f"{a['name']} ({a['size']})" for a in mail["attachments"]))
-        lines.append("\n[본문]\n" + strip_quoted(body))
+        lines.append("\n[본문]\n" + clean_body(body))
         if brief:
             lines.append("\n[이번 요청] 위 메일은 과거 기록 보강용이다. summary 는 1~2줄(200자 이내)로 "
                          "핵심만 쓰고, actionItems 는 빈 배열, replyDrafts 는 생략한다.")
@@ -1347,7 +1560,7 @@ class Gemini:
                 "maxOutputTokens": 3000,
             },
         }
-        # 2.5-flash 는 thinking 을 끄고 JSON 출력에 토큰을 몰아준다(2.5-pro 는 thinking 최소치가 있어 건드리지 않음)
+        # flash 계열은 thinking 을 끄고 JSON 출력에 토큰을 몰아준다(pro 계열은 thinking 최소치가 있어 건드리지 않음)
         if "flash" in self.model:
             payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         data = self._request(payload)
@@ -1359,9 +1572,34 @@ class Gemini:
 
 
 # ────────────────────────────────────────────────────────────── 분석 대체(키 없음/실패 시)
+GREETING_RE = (
+    r"^(?:안녕하십니까|안녕하세요|수고하십니다|수고하셨습니다|반갑습니다|감사합니다)\s*[?!.,]*\s*",
+    r"^천일정기화물자동차\s*(?:\(주\)|㈜)?[^.!?]{0,60}?(?:입니다|드립니다)\s*[.!]?\s*",
+    r"^(?:수신자|수신)\s*제위\s*[.,]?\s*",
+    r"^(?:업무에\s*)?노고가\s*많으십니다\s*[.!]?\s*",
+)
+
+
+def strip_greeting(text: str) -> str:
+    """앞머리의 인사말·소속 소개를 걷어낸다 — 휴리스틱 요약이 인사말로 채워지지 않게.
+
+    웹메일 본문은 <div> 단위로 잘려 '안녕하십니까 ? 천일정기화물자동차(주) … 입니다 .' 처럼
+    조각나 있으므로, 공백을 정리한 한 줄에서 앞에서부터 최대 4번 반복해 떼어 낸다.
+    """
+    s = _clean(text or "")
+    for _ in range(4):
+        before = s
+        for pat in GREETING_RE:
+            s = re.sub(pat, "", s, count=1)
+        if s == before:
+            break
+    return s.strip()
+
+
 def heuristic_analysis(mail: dict, to_me: bool) -> dict:
-    body = strip_quoted(mail.get("bodyText") or "")
-    first = _clean(body)[:280]
+    body = clean_body(mail.get("bodyText") or "")
+    core = strip_greeting(body) or body          # 인사말·소속 소개는 요약에서 뺀다
+    first = _clean(core)[:280]
     title = mail.get("subject") or ""
     cat = "기타"
     for key, c in (("출하리스트", "출하/보급"), ("납입요청", "납입요청"), ("재고", "재고/실사"),
@@ -1444,7 +1682,7 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
         item["attachments"] = mail["attachments"]
     if analysis.get("tags"):
         item["tags"] = analysis["tags"]
-    body = strip_quoted(mail.get("bodyText") or "")
+    body = clean_body(mail.get("bodyText") or "")
     if body:
         item["bodyText"] = body[:2500]
     if analysis.get("replyDrafts") and item["replyStatus"] == "needs_reply":
@@ -1715,15 +1953,32 @@ def sync(args: argparse.Namespace) -> dict:
     return report
 
 
-def collect_images(nm: Nmail, imgs: list[dict], report: dict, *, cap_each: int = 300_000, max_n: int = 3) -> list[dict]:
-    """본문 인라인 이미지를 data URI 로 (최대 max_n장). 실패는 조용히 건너뛴다."""
+def collect_images(nm: Nmail, imgs: list[dict], report: dict, *, cap_each: int = 300_000,
+                   max_n: int = 3, min_bytes: int = IMG_MIN_BYTES) -> list[dict]:
+    """본문 인라인 이미지를 data URI 로 (최대 max_n장).
+
+    실패·로고·아이콘은 조용히 건너뛴다.
+    · 내려받은 바이트가 min_bytes(기본 12KB) 미만 → 로고·SNS 아이콘·추적 픽셀
+    · 실제 픽셀이 소형 아이콘(width<=130·height<=70)이거나 가로형 배너
+      (height<=140 이고 width>=2.5*height) → 'Hi CHUNIL, High green' 같은 슬로건 배너
+    · 같은 메일에 같은 이미지가 여러 번 붙으면(해시 동일) 한 번만 남긴다
+    """
     out: list[dict] = []
+    seen: set[str] = set()
     for im in imgs:
         if len(out) >= max_n:
             break
         blob = nm.fetch_bytes(im["src"], cap=cap_each)
         if not blob:
             continue
+        if len(blob) < min_bytes:
+            continue                # 12KB 미만 — 로고·아이콘·추적 픽셀
+        if is_banner_or_icon(image_size(blob)):
+            continue                # 슬로건·서명 배너 · 소형 아이콘
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest in seen:
+            continue                # 같은 배너가 서명에 3번 붙어도 사진은 1장
+        seen.add(digest)
         ctype = "image/jpeg"
         head = blob[:12]
         if head[:8] == b"\x89PNG\r\n\x1a\n":
@@ -1804,7 +2059,7 @@ def fixture_check(list_path: str | None, read_path: str | None) -> int:
             d = parse_read(f.read())
         print(f"· 본문 파서: 제목={d['subject'][:50]!r} 날짜={d['date']} 발신={d['from_raw'][:50]!r}")
         print(f"   to={len(d['to'])} cc={len(d['cc'])} 첨부={[a['name'] + ' ' + a['size'] for a in d['attachments']]}")
-        print(f"   본문 {len(d['bodyText'])}자 / 인용 제거 후 {len(strip_quoted(d['bodyText']))}자 / "
+        print(f"   본문 {len(d['bodyText'])}자 / 인용·서명 제거 후 {len(clean_body(d['bodyText']))}자 / "
               f"지목={mentions_me(d['bodyText'])}")
         if not d["subject"] or not d["date"]:
             print("   ! 제목/날짜 파싱 실패")

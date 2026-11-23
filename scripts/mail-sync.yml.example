@@ -66,7 +66,7 @@ jobs:
           CHUNIL_PW: ${{ secrets.CHUNIL_PW }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MAILBOARD_PIN: ${{ secrets.MAILBOARD_PIN }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
           NMAIL_IP_CHECK: ${{ vars.NMAIL_IP_CHECK || '1' }}
         run: |
           ARGS="--data-enc data.enc.json"
@@ -84,7 +84,7 @@ jobs:
           CHUNIL_PW: ${{ secrets.CHUNIL_PW }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MAILBOARD_PIN: ${{ secrets.MAILBOARD_PIN }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
           NMAIL_IP_CHECK: ${{ vars.NMAIL_IP_CHECK || '1' }}
         run: |
           ARGS="--data-enc data.enc.json --limit ${{ inputs.backfill_count }} --chars 1100"
