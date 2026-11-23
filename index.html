@@ -2178,8 +2178,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     pinSave();
     renderKpi(); renderSeg(); renderList();
     if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
-    toast(on ? "📌 고정 — ‘📌 고정’ 탭에 계속 남습니다 · " + shortTitle(it)
-             : "📌 고정을 풀었습니다 · " + shortTitle(it));
+    toast(on ? "📌 고정 — 원래 탭에서 ‘📌 고정’ 탭으로 옮겼습니다 (고정을 풀면 원래 자리로 돌아갑니다) · " + shortTitle(it)
+             : "📌 고정을 풀었습니다 — 원래 탭으로 돌아왔습니다 · " + shortTitle(it));
     return on;
   }
 
@@ -2307,7 +2307,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     pinSave();
     bulkSel.pin.clear();
     renderKpi(); renderSeg(); renderList();
-    toast("📌 " + list.length + "건 고정을 풀었습니다", 2600);
+    toast("📌 " + list.length + "건 고정을 풀었습니다 — 원래 탭으로 돌아갑니다", 2600);
   }
   function threadOf(it) { return it.thread && it.thread.length ? it.thread : [{ date: it.receivedAt, from: it.sender, gist: it.title, link: it.mailLink }]; }
 
@@ -3487,7 +3487,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
         "</span></span>" +
       '<span class="rside">' + (isArchived(it) ? '<span class="badge b-arch">' + ((it.mailbox === "sent") ? "📤 보낸" : "📥 받은") + " · 이전 기록</span>" : "") +
         '<button type="button" class="badge tog b-pin' + (pin ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (pin ? "true" : "false") + '" title="' +
-          esc(pin ? "📌 고정됨 — 누르면 고정을 풉니다" : "📌 고정 — 누르면 ‘📌 고정’ 탭에 계속 남습니다") +
+          esc(pin ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다" : "📌 고정 — 누르면 원래 탭에서 ‘📌 고정’ 탭으로 옮겨집니다") +
           '" aria-label="메일 고정 토글">📌' + (pin ? '<span class="pin-txt"> 고정됨</span>' : "") + "</button>" +
         (d.text && p !== 3 ? '<span class="badge b-due ' + d.cls + '">' + esc(d.text) + "</span>" : "") +
         '<button type="button" class="badge tog b-cal' + (calDate(it) ? " on" : "") + '" data-cal-tog="' + esc(it.id) + '" title="' +
@@ -3529,7 +3529,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     $("dayChip").classList.add("on");
     const bkey = bulkTab();
     if (bkey) bulkPrune(bkey, shown.map((it) => it.id));
+    const hiddenDone = list.length - shown.length;
     let html = '<div class="sec-title">📅 ' + esc(day) + ' 메일 <span class="hint">📅 캘린더 등록 ' + reg + "건 · 마감 " + due + "건" +
+      (hiddenDone > 0 ? " · 보이는 " + shown.length + "건 (✅ 완료 " + hiddenDone + "건 숨김)" : "") +
       (view.q.trim() ? " · ‘" + esc(view.q.trim()) + "’ 검색 " + shown.length + "건" : "") + "</span></div>";
     if (shown.length) {
       html += bulkBarHtml(shown);
@@ -3553,7 +3555,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (view.replyOnly) list = list.filter((it) => replyOf(it) === "needs_reply");
     /* ✅ 확인으로 완료한 메일은 기본 목록에서 숨김 — 검색어를 입력하거나 '완료 포함'을 켜면 다시 나온다 */
     if (!view.showDone && !view.q.trim()) list = list.filter((it) => !isDone(it));
-    /* 📌 고정한 메일은 어떤 탭에서 보든 목록 맨 위로 올린다 */
+    /* 📌 고정한 메일은 ‘📌 고정’ 탭으로 옮겨 간다 — 같은 메일이 두 곳에 보이지 않게.
+       검색어를 입력했을 때만 검색 결과로 다시 보이고, 고정을 풀면 원래 탭으로 돌아온다. */
+    if (view.tab !== "pin" && !view.q.trim()) list = list.filter((it) => !isPinned(it));
     return pinFirst(sortList(list));
   }
 
@@ -3626,7 +3630,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     const list = pinListForView(), total = pinnedItems().length;
     bulkPrune("pin", list.map((it) => it.id));
     const arch = list.filter(isArchived).length, done = list.filter(isDone).length;
-    let html = '<div class="banner" style="border-color:#f0d6b0;background:#fffaf2">📌 <div><b>고정한 메일</b> — 분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 고정을 풀기 전까지 여기에 계속 남습니다. 행을 누르면 상세를 열고, <b>📌</b>을 다시 누르면 고정이 풀립니다.</div></div>';
+    let html = '<div class="banner" style="border-color:#f0d6b0;background:#fffaf2">📌 <div><b>고정한 메일</b> — <b>📌</b>을 누르면 원래 탭에서 빠져 <b>여기 ‘📌 고정’ 탭으로 옮겨집니다</b>(고정을 풀면 원래 자리로 돌아갑니다). 분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 계속 남고, 행을 누르면 상세가 열립니다.</div></div>';
     html += '<div class="sec-title">📌 고정 <span class="hint">' + list.length + "건" +
       (view.q.trim() ? " · “" + esc(view.q.trim()) + "” 검색" : "") +
       (arch ? " · 이전 기록 " + arch : "") + (done ? " · ✅ 완료 " + done : "") + "</span></div>";
@@ -3635,7 +3639,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       ? '<div class="rows">' + list.map(rowHtml).join("") + "</div>"
       : '<div class="empty">' + (total
         ? "검색 조건에 맞는 고정 메일이 없습니다.<br>검색어를 지우면 고정한 " + total + "건이 모두 나옵니다."
-        : "아직 고정한 메일이 없습니다.<br>메일 행 오른쪽의 <b>📌</b> 또는 상세 화면 위쪽의 <b>📌 고정</b>을 누르면 이 탭에 계속 남습니다.") + "</div>";
+        : "아직 고정한 메일이 없습니다.<br>메일 행 오른쪽의 <b>📌</b> 또는 상세 화면 위쪽의 <b>📌 고정</b>을 누르면 원래 탭에서 빠져 이 탭으로 옮겨집니다.") + "</div>";
     $("listWrap").innerHTML = html;
     $("dayChip").classList.remove("on");
   }
@@ -4718,7 +4722,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="badges">' + badgeRow(it) + "</div>" +
         "<h2>" + esc(it.title) + "</h2></div>" +
         '<button type="button" class="dr-pin' + (isPinned(it) ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (isPinned(it) ? "true" : "false") + '" title="' +
-          esc(isPinned(it) ? "📌 고정됨 — 누르면 고정을 풉니다 (분류·완료와 무관하게 ‘📌 고정’ 탭에 계속 남습니다)" : "📌 고정 — ‘📌 고정’ 탭에 계속 남겨 둡니다") + '">📌 ' + (isPinned(it) ? "고정됨" : "고정") + "</button>" +
+          esc(isPinned(it) ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다 (분류·완료와 무관하게 ‘📌 고정’ 탭에 모여 있습니다)" : "📌 고정 — 원래 탭에서 ‘📌 고정’ 탭으로 옮겨 둡니다") + '">📌 ' + (isPinned(it) ? "고정됨" : "고정") + "</button>" +
         '<button class="dr-close" id="drClose" aria-label="닫기">✕</button></div>' +
       '<div class="dr-body">' + backBar +
         /* 1. 메일 원문 — 발신·수신·참조 → 본문 표 · 본문 텍스트 · 본문 사진 · 첨부파일 */
