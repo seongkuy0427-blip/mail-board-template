@@ -1176,7 +1176,8 @@ def strip_quoted(text: str) -> str:
 SIGN_TEXT_PATTERNS = (
     r"(?:gm\s*)?confidential",                       # GM Confidential · CONFIDENTIAL
     r"본\s*메일은\s*지정된\s*수신인",                 # 국문 기밀 면책
-    r"본\s*메일.*(?:승인용도|사용할\s*수\s*없습니다)",   # 전자결재 면책
+    r"[\s(（\[·•\-]*본\s*메일.*(?:승인용도|사용할\s*수\s*없습니다)",   # 전자결재 면책(괄호·머리표 허용)
+    r"—\s*서명\s*—\s*$",                              # 예전 파이프라인이 남긴 서명 구분선
     r"이\s*메일은\s*.*(?:수신인|대상으로)",
     r"무단\s*전재",
     r"무단\s*배포",
