@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -247,6 +247,100 @@ def atomic_write_json(path: str, obj: Any, mode: int | None = None) -> None:
             pass
 
 
+# ────────────────────────────────────────────────────────────── 저장된 본문 사진 정리
+#  2026-11-24 사용자 지적: GitHub data.enc.json 은 정리됐는데, PC 의 data/users/*/board.json 은
+#  예전 수집분이라 `Hi CHUNIL, High green` 배너와 흐릿한 엑셀 X 아이콘이 그대로 보였다.
+#  새 수집과 같은 기준(12KB 미만 · 배너/아이콘 비율 · 같은 사진 중복)으로 이미 저장된 사진도 거른다.
+def _data_uri_bytes(uri: str) -> bytes | None:
+    s = str(uri or "")
+    if not s.startswith("data:"):
+        return None
+    head, _, payload = s.partition(",")
+    if ";base64" not in head or not payload:
+        return None
+    try:
+        return base64.b64decode(payload)
+    except (ValueError, TypeError):
+        return None
+
+
+def sanitize_board_images(board: dict[str, Any]) -> int:
+    """이미 저장된 `it["images"]` 에서 슬로건 배너·소형 아이콘·중복을 걷어낸다 → 지운 장수."""
+    removed = 0
+    seen: set[str] = set()
+    items = board.get("items") if isinstance(board, dict) else None
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        imgs = it.get("images")
+        if not isinstance(imgs, list) or not imgs:
+            continue
+        keep = []
+        for im in imgs:
+            if not isinstance(im, dict):
+                removed += 1
+                continue
+            blob = _data_uri_bytes(im.get("dataUrl") or im.get("dataURI") or "")
+            if blob is None:
+                keep.append(im)          # data URI 가 아니면 건드리지 않는다
+                continue
+            if len(blob) < sm.IMG_MIN_BYTES or sm.is_banner_or_icon(sm.image_size(blob)):
+                removed += 1
+                continue
+            digest = hashlib.sha256(blob).hexdigest()
+            if digest in seen:
+                removed += 1
+                continue
+            seen.add(digest)
+            keep.append(im)
+        if len(keep) != len(imgs):
+            if keep:
+                it["images"] = keep
+                it["imageCount"] = len(keep)
+            else:
+                it.pop("images", None)
+                it.pop("imageCount", None)
+    return removed
+
+
+def sanitize_user_board_images(uid: str) -> int:
+    """사용자 board.json 한 개를 읽어 정리하고, 바뀌었으면 0600 으로 다시 쓴다."""
+    path = user_path(uid, "board.json")
+    board = read_json(path, None)
+    if not isinstance(board, dict):
+        return 0
+    removed = sanitize_board_images(board)
+    if not removed:
+        return 0
+    try:
+        atomic_write_json(path, board, mode=0o600)
+    except OSError as e:
+        print(f"[images] {uid} board.json 정리 저장 실패: {e}", file=sys.stderr)
+        return 0
+    print(f"[images] {uid} 저장된 본문 사진 {removed}장 정리(슬로건 배너·아이콘·중복)", flush=True)
+    return removed
+
+
+def sanitize_all_boards() -> int:
+    """data/users/*/board.json 전체를 한 번 정리한다(서버 기동 때 — 업데이트 재시작만으로 즉시 반영)."""
+    root = os.path.join(data_dir(), "users")
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return 0
+    total = 0
+    for uid in names:
+        if not os.path.isfile(os.path.join(root, uid, "board.json")):
+            continue
+        try:
+            total += sanitize_user_board_images(uid)
+        except Exception as e:  # noqa: BLE001 - 정리가 실패해도 서버는 뜬다
+            print(f"[images] {uid} 정리 실패: {type(e).__name__}: {e}", file=sys.stderr)
+    if total:
+        print(f"[images] 저장된 본문 사진 모두 {total}장 정리했습니다", flush=True)
+    return total
+
+
 # ────────────────────────────────────────────────────────────── 로그 파일
 #  pythonw.exe(창 없는 실행)에서는 콘솔이 없어 print 가 사라진다. 그 때도 남도록
 #  stdout/stderr 를 data/server.log 로 함께 보낸다(5MB 넘으면 .1/.2 로 넘김).
@@ -373,10 +467,16 @@ def enable_file_logging(path: str) -> str:
 
 def reset_runtime(data_dir_path: str | None = None) -> None:
     """테스트용 — 세션·상태·캐시를 비운다."""
+    global _SESSION_DIR
     if data_dir_path:
         CFG["data_dir"] = os.path.abspath(data_dir_path)
     with SESS_LOCK:
         SESSIONS.clear()
+        try:
+            os.remove(sessions_path())      # 빈 상태에서 시작 — 지난 파일의 세션이 되살아나지 않게
+        except OSError:
+            pass
+    _SESSION_DIR = None          # 지운 파일을 다음 요청이 다시 읽어 빈 상태에서 시작
     with STATUS_LOCK:
         STATUS.clear()
     with RUN_LOCK:
@@ -492,6 +592,69 @@ def needs_relogin(uid: str) -> bool:
 
 
 # ────────────────────────────────────────────────────────────── 세션
+#  로그인 세션은 RAM(SESSIONS)에만 두지 않고 data/sessions.json(0600)에도 남긴다.
+#  자동 업데이트 재시작이나 PC 재부팅으로 프로세스가 새로 떠도, 브라우저 쿠키가 살아 있으면
+#  같은 로그인이 그대로 이어진다(만료된 세션은 되살리지 않고 파일에서도 지운다).
+SESSION_FILE = "sessions.json"
+SESSION_MAX = 400                     # 파일이 끝없이 자라지 않게 — 오래 쓴 것부터 버린다
+_SESSION_DIR: str | None = None       # 어느 data 폴더의 세션 파일을 이미 읽었는지
+
+
+def sessions_path() -> str:
+    return os.path.join(data_dir(), SESSION_FILE)
+
+
+def _persist_sessions_locked() -> None:
+    """SESS_LOCK 을 잡은 채로 호출한다 — 지금 세션을 파일에 원자적으로 쓴다."""
+    now = time.time()
+    rows = {sid: rec for sid, rec in SESSIONS.items()
+            if isinstance(rec, dict) and isinstance(rec.get("expires"), (int, float))
+            and rec["expires"] > now}
+    if len(rows) > SESSION_MAX:
+        keep = sorted(rows.items(), key=lambda kv: float(kv[1].get("last") or 0),
+                      reverse=True)[:SESSION_MAX]
+        rows = dict(keep)
+    try:
+        atomic_write_json(sessions_path(), {"saved": stamp(), "sessions": rows}, mode=0o600)
+    except OSError as e:              # 디스크 문제로 로그인이 막히지는 않게
+        print(f"경고: 세션 파일을 쓰지 못했습니다({sessions_path()}): {e}", file=sys.stderr)
+
+
+def restore_sessions() -> int:
+    """data/sessions.json 에서 로그인 세션을 되살린다 — 만료·깨진 줄은 버리고 파일도 정리한다."""
+    global _SESSION_DIR
+    d = os.path.abspath(data_dir())
+    if _SESSION_DIR == d:
+        return 0
+    _SESSION_DIR = d
+    raw = read_json(sessions_path(), {}) or {}
+    rows = raw.get("sessions") if isinstance(raw, dict) else None
+    if not isinstance(rows, dict) or not rows:
+        return 0
+    now = time.time()
+    n = 0
+    with SESS_LOCK:
+        for sid, rec in rows.items():
+            if not isinstance(rec, dict) or sid in SESSIONS:
+                continue
+            uid, exp = rec.get("user"), rec.get("expires")
+            if not isinstance(uid, str) or not uid:
+                continue
+            if not isinstance(exp, (int, float)) or exp <= now:
+                continue
+            SESSIONS[sid] = {"user": uid,
+                             "created": float(rec.get("created") or now),
+                             "expires": float(exp),
+                             "remember": bool(rec.get("remember")),
+                             "last": float(rec.get("last") or now)}
+            n += 1
+        if n != len(rows):
+            _persist_sessions_locked()      # 만료분이 있었다 — 파일도 깨끗하게
+    if n:
+        print(f"로그인 세션 {n}건을 되살렸습니다 ({sessions_path()})")
+    return n
+
+
 def create_session(uid: str, remember: bool) -> str:
     sid = secrets.token_urlsafe(32)
     ttl = (CFG["remember_days"] if remember else 0) * 86400 or CFG["session_hours"] * 3600
@@ -499,18 +662,21 @@ def create_session(uid: str, remember: bool) -> str:
     with SESS_LOCK:
         SESSIONS[sid] = {"user": uid, "created": now, "expires": now + ttl,
                          "remember": bool(remember), "last": now}
+        _persist_sessions_locked()
     return sid
 
 
 def get_session(sid: str | None) -> dict | None:
     if not sid:
         return None
+    restore_sessions()               # 재시작 뒤 첫 요청이면 파일에서 되살린다
     with SESS_LOCK:
         s = SESSIONS.get(sid)
         if not s:
             return None
         if s["expires"] < time.time():
             SESSIONS.pop(sid, None)
+            _persist_sessions_locked()
             return None
         s["last"] = time.time()
         return dict(s)
@@ -521,6 +687,7 @@ def drop_session(sid: str | None) -> None:
         return
     with SESS_LOCK:
         SESSIONS.pop(sid, None)
+        _persist_sessions_locked()
 
 
 # ────────────────────────────────────────────────────────────── 진행 상태
@@ -1041,6 +1208,9 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             )
         board["items"].sort(key=lambda it: (str(it.get("lastAt") or it.get("receivedAt") or ""), str(it.get("id"))),
                             reverse=True)
+        pruned = sanitize_board_images(board)      # 예전 수집분의 슬로건 배너·아이콘도 함께 정리
+        if pruned:
+            print(f"[sync] {uid} 저장된 본문 사진 {pruned}장 정리", flush=True)
         atomic_write_json(board_path, board, mode=0o600)
         update_user_meta(uid, needsRelogin=False,
                          lastSync=board["updatedAt"], itemCount=len(board["items"]))
@@ -2302,6 +2472,8 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as e:
             print(f"경고: 로그 파일을 열지 못했습니다({log_path}): {e}", file=sys.stderr)
     master_key()                                  # data/.server_key (0600) 준비
+    restore_sessions()                            # 재시작·재부팅 전에 로그인한 세션 되살리기
+    sanitize_all_boards()                         # 예전에 저장한 슬로건 배너·소형 아이콘 정리
     if not CFG["gemini_key"]:
         print("안내: GEMINI_API_KEY 가 없습니다 — 메일 요약은 기본 규칙 모드로 동작합니다"
               "(.env 에 넣으면 Gemini 분석이 켜집니다).", file=sys.stderr)

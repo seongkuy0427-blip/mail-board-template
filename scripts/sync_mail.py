@@ -133,6 +133,7 @@ IMG_SMALL_W = 130                       # 이보다 좁으면 소형 아이콘
 IMG_SMALL_H = 70                        # 이보다 낮으면 소형 아이콘·구분선
 IMG_BANNER_H = 140                      # 높이 140 이하에서
 IMG_BANNER_RATIO = 2.5                  # 가로가 세로의 2.5배 이상이면 가로형 슬로건·서명 배너
+IMG_BANNER_MAX_W = 700                  # 단, 폭 700 미만만 — 1200x110 같은 표 캡처는 본문 사진이다
 DEFAULT_MODEL = "gemini-3.8-flash"
 
 
@@ -1071,14 +1072,20 @@ def image_size(blob: bytes) -> tuple[int, int] | None:
 
 
 def is_banner_or_icon(size: tuple[int, int] | None) -> bool:
-    """실제 픽셀 크기가 회사 슬로건 배너·서명 배너·소형 아이콘인가."""
+    """실제 픽셀 크기가 회사 슬로건 배너·서명 배너·소형 아이콘인가.
+
+    ★ 2026-11-24 회귀 수정: 본문의 **가로로 넓은 표 캡처**(1200x110 · 1217x135)가
+      비율만 보고 잘려 나갔다. 슬로건 배너는 폭이 좁고(425 · 500 · 570) 납작하므로,
+      가로 배너 판정은 `w < IMG_BANNER_MAX_W(700)` 일 때만 적용한다.
+      폭 700 이상의 납작한 이미지는 표·현황 캡처로 보고 살린다.
+    """
     if not size:
         return False                    # 크기를 못 읽으면 사진으로 본다(내용을 잃지 않게)
     w, h = size
     if w <= IMG_SMALL_W or h <= IMG_SMALL_H:
         return True                     # 작은 아이콘·구분선
-    if h <= IMG_BANNER_H and w >= IMG_BANNER_RATIO * h:
-        return True                     # 가로형 슬로건·서명 배너
+    if w < IMG_BANNER_MAX_W and h <= IMG_BANNER_H and w >= IMG_BANNER_RATIO * h:
+        return True                     # 가로형 슬로건·서명 배너(폭 700 미만)
     return False
 
 
@@ -1111,9 +1118,9 @@ def parse_read(html: str) -> dict:
     body_el = soup.select_one("#mf_body_view")
     body_text = ""
     if body_el is not None:
-        body_text = body_el.get_text("\n", strip=True)
+        body_text = el_text(body_el)
     elif len(soup.select("table")) > 4:
-        body_text = soup.select("table")[4].get_text("\n", strip=True)
+        body_text = el_text(soup.select("table")[4])
 
     attachments = []
     for a in soup.select("td.mf_attach_names_wrap li a"):
@@ -1172,23 +1179,21 @@ def strip_quoted(text: str) -> str:
     return text[:cut].strip()
 
 
-# 본문 하단의 서명·슬로건·기밀 면책 — 줄 머리에서만 인정한다(본문 중간의 'Tel.' 오인 방지).
+# 본문 하단의 슬로건·기밀 면책 문구 — 줄 머리에서만 인정한다(본문 중간의 'Tel.' 오인 방지).
+#  ★ 직원 서명은 남긴다(2026-11-24 사용자 정정: "서명은 보여야대, 필요없는 회사 슬로건 같은게 보인다는거야").
+#    — 서명 구분선 · 회사명 줄 · 소속/직급/이름 · 주소·TEL/Fax/Mobile/E-Mail 은 자르지 않는다.
+#    걸러 내는 것은 회사 슬로건과 기밀·법적 면책 문구뿐이다.
 SIGN_TEXT_PATTERNS = (
     r"(?:gm\s*)?confidential",                       # GM Confidential · CONFIDENTIAL
     r"본\s*메일은\s*지정된\s*수신인",                 # 국문 기밀 면책
     r"[\s(（\[·•\-]*본\s*메일.*(?:승인용도|사용할\s*수\s*없습니다)",   # 전자결재 면책(괄호·머리표 허용)
-    r"—\s*서명\s*—\s*$",                              # 예전 파이프라인이 남긴 서명 구분선
     r"이\s*메일은\s*.*(?:수신인|대상으로)",
     r"무단\s*전재",
     r"무단\s*배포",
     r"the\s*next\s*100",                             # 회사 슬로건
-    r"70\s*년의\s*경험",
-    r"천일정기화물자동차\s*(?:[\(（]\s*주\s*[\)）])?\s*$",   # 서명 첫 줄(회사명만 있는 줄)
-    # 연락처 — TEL : 032-... · Tel. +82 31 ... · Office Tel : ... · Mobile 010-...
-    r"(?:office\s*|cellular\s*|cell\s*|direct\s*)?(?:tel|fax|mobile|phone|hp)\s*\.?\s*[:：+]?\s*[\(\d+]",
-    r"(?:tel|fax|mobile|e-?mail)\s*\.?\s*[:：]?\s*$",          # 이름만 있는 줄(TEL / E-Mail)
-    r"e-?mail\s*[:：]",
-    r"(?:주소|사업장)\s*[:：].*(?:tel|fax|mobile).*(?:tel|fax|mobile)",   # 서명 한 줄에 주소·연락처가 다 붙은 경우
+    r"hi\s*,?\s*chunil",                             # 회사 슬로건(Hi CHUNIL, High green)
+    r"high\s*green",
+    r"70\s*년의\s*경험",                             # 회사 슬로건
 )
 SIGN_TEXT_AFTER = 60            # 본문 앞 60자 안의 같은 낱말은 본문으로 본다
 
@@ -1199,7 +1204,7 @@ def is_sign_text(line: str) -> bool:
 
 
 def strip_signature(text: str) -> str:
-    """본문 하단의 서명·슬로건·기밀 면책 문구를 잘라낸다.
+    """본문 하단의 슬로건·기밀 면책 문구를 잘라낸다(직원 서명·연락처는 남긴다).
 
     - 줄 머리에서 시작하는 줄만 인정한다.
     - 앞 SIGN_TEXT_AFTER 자 안에서는 건드리지 않는다(첫 줄이 면책 낱말로 시작해 통째로 날아가는 것 방지).
@@ -1214,13 +1219,122 @@ def strip_signature(text: str) -> str:
     return text.strip()
 
 
+# ────────────────────────────────────────────────────────────── 본문 텍스트 추출
+#  웹메일 본문은 <div>/<span> 조각으로 나뉜다. get_text("\n") 은 요소 경계마다 줄을 바꿔
+#  `<span>11</span>월 <span>24</span>일` 을 `11\n월\n24\n일` 로 찢는다.
+#  그래서 **블록 태그 경계에서만** 줄을 바꾸고, 인라인 태그(span·b·font 등)는 붙여 쓴다.
+BLOCK_TAGS = frozenset({
+    "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt", "fieldset",
+    "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+    "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody", "tfoot", "thead",
+    "caption", "tr", "ul",
+})
+SKIP_TAGS = frozenset({"script", "style", "head", "noscript", "template"})
+CELL_TAGS = frozenset({"td", "th"})              # 표 칸은 붙으면 안 되니 공백으로 나눈다
+VOID_TAGS = frozenset({"br", "hr", "img", "input", "meta", "link", "wbr"})
+
+
+def el_text(el: Any) -> str:
+    """본문 요소 → 글자 — 블록 경계에서만 줄을 바꾸고 인라인 조각은 붙여 쓴다.
+
+    `<div><span>11</span>월 <span>24</span>일</div>` → `11월 24일`
+    `<div>첫 줄</div><div>둘째 줄</div>` → `첫 줄\n둘째 줄`
+    """
+    parts: list[str] = []
+
+    def walk(node: Any) -> None:
+        name = getattr(node, "name", None)
+        if name is None:                                  # NavigableString
+            parts.append(str(node))
+            return
+        name = name.lower()
+        if name in SKIP_TAGS:
+            return
+        block = name in BLOCK_TAGS
+        if block:
+            parts.append("\n")
+        elif name in CELL_TAGS:
+            parts.append(" ")
+        if name not in VOID_TAGS:
+            for child in node.children:
+                walk(child)
+        if block:
+            parts.append("\n")
+        elif name in CELL_TAGS:
+            parts.append(" ")
+
+    walk(el)
+    raw = "".join(parts).replace("\u00a0", " ")
+    out: list[str] = []
+    for line in raw.split("\n"):
+        line = re.sub(r"[ \t\u200b\ufeff]+$", "", re.sub(r"^[ \t\u200b\ufeff]+", "", line))
+        line = re.sub(r"[ \t]{2,}", "  ", line).rstrip()
+        if not line:
+            if not out or not out[-1]:                # 빈 줄은 한 번만
+                out.append("")
+                continue
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 def clean_body(text: str) -> str:
-    """분석·저장에 쓰는 본문 — 인용과 서명/슬로건/면책 문구를 걷어낸다."""
+    """분석·저장에 쓰는 본문 — 인용 헤더와 슬로건·면책 문구만 걷어낸다(직원 서명은 남긴다)."""
     return strip_signature(strip_quoted(text or ""))
 
 
 def mentions_me(text: str) -> bool:
     return bool(MENTION_RE.search(strip_quoted(text or "")))
+
+
+# ────────────────────────────────────────────────────────────── 본문 속 마감 기한
+#  `제출 기한 : 12월 2일` · `마감 : 12/2` · `~ 12/2 까지` · `회신 기한 12/2` 처럼 본문에 적힌
+#  기한을 직접 읽는다. AI 분석이 없거나 실패해 기본 모드로 돌아도 캘린더·마감 배지가 맞게 동작한다.
+DEADLINE_BEFORE = re.compile(
+    r"(?:제출\s*기한|회신\s*기한|보고\s*기한|제출\s*일|회신\s*일|마감\s*(?:일|기한|일자)?|납기(?:일)?|기한)"
+    r"\s*(?:은|는|이|가|을|를|:)?\s*[:：~∼\-–]?\s*$")
+DEADLINE_AFTER = re.compile(
+    r"^\s*(?:\([^)]{1,6}\)|\[[^\]]{1,6}\])?\s*(?:까지|까지임|까지입니다|까지\s*(?:제출|회신|송부)|until|by\b)", re.I)
+MONTH_DAY = re.compile(
+    r"(?<!\d)(?:(20\d{2})\s*[년./\-]\s*)?"
+    r"(1[0-2]|0?[1-9])\s*[월./\-]\s*(3[01]|[12]\d|0?[1-9])\s*일?(?!\d)")
+
+
+def deadline_date(text: str, ref: str = "") -> str | None:
+    """본문·제목에서 '기한·마감·~까지' 가 붙은 날짜를 찾는다 → YYYY-MM-DD (없으면 None)."""
+    s = str(text or "")
+    if not s:
+        return None
+    ref_d = None
+    m_ref = re.match(r"(20\d{2})-(\d{2})-(\d{2})", str(ref or ""))
+    if m_ref:
+        try:
+            ref_d = dt.date(int(m_ref.group(1)), int(m_ref.group(2)), int(m_ref.group(3)))
+        except ValueError:
+            ref_d = None
+    for m in MONTH_DAY.finditer(s):
+        before = s[max(0, m.start() - 24):m.start()]
+        after = s[m.end():m.end() + 12]
+        if not (DEADLINE_BEFORE.search(before) or DEADLINE_AFTER.match(after)):
+            continue
+        year = int(m.group(1)) if m.group(1) else (ref_d.year if ref_d else dt.date.today().year)
+        try:
+            got = dt.date(year, int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+        if ref_d and got < ref_d - dt.timedelta(days=180):
+            try:
+                got = got.replace(year=year + 1)      # `1월 5일` 을 12월에 받은 메일
+            except ValueError:
+                pass
+        return got.isoformat()
+    return None
+
+
+def deadline_label(ymd: str) -> str:
+    """2026-12-02 → `12월 2일`"""
+    m = re.match(r"(20\d{2})-(\d{2})-(\d{2})", str(ymd or ""))
+    return f"{int(m.group(2))}월 {int(m.group(3))}일" if m else (ymd or "")
 
 
 # ────────────────────────────────────────────────────────────── 분류 (make_data.py 규칙 그대로)
@@ -1497,6 +1611,8 @@ def heuristic_analysis(mail: dict, to_me: bool) -> dict:
     core = strip_greeting(body) or body          # 인사말·소속 소개는 요약에서 뺀다
     first = _clean(core)[:280]
     title = mail.get("subject") or ""
+    # 본문에 `제출 기한 : 12월 2일` 처럼 적힌 기한은 AI 없이도 그대로 읽어 dueDate 를 채운다
+    due = deadline_date(title + "\n" + body, mail.get("date") or mail.get("receivedAt") or "")
     cat = "기타"
     for key, c in (("출하리스트", "출하/보급"), ("납입요청", "납입요청"), ("재고", "재고/실사"),
                    ("PTR", "PTR"), ("용기", "승인/검토"), ("승인", "승인/검토"), ("결품", "결품/보고")):
@@ -1506,8 +1622,9 @@ def heuristic_analysis(mail: dict, to_me: bool) -> dict:
     return {
         "summary": first or title,
         "actionItems": [],
-        "dueDate": None,
-        "deadline": "별도 회신 기한 없음" if not to_me else "확인 필요",
+        "dueDate": due,
+        "deadline": (deadline_label(due) if due
+                     else ("별도 회신 기한 없음" if not to_me else "확인 필요")),
         "replyStatus": "needs_reply" if to_me else "no_reply_needed",
         "category": cat,
         "urgency": "normal",

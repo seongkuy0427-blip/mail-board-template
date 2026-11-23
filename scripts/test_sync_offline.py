@@ -572,13 +572,17 @@ def run(pin: str, keep: bool) -> int:
     check("로고·슬로건·서명 이미지 제외", imgs == ["image001.png", "work_table.png"], str(imgs))
     sign_body = ("하기 11/24(화) 07:00 기준 EOP자재 재고실사 결과와 재고 수량 변동 내역을 송부드립니다.\n"
                  "첨부 자료 확인 부탁드립니다.\n\n"
-                 "천일정기화물자동차 (주)\nSCM사업본부 자동차물류사업부 납입1팀 과장 김성규\n"
-                 "주소 : 인천 부평구 부평대로 233 · TEL 032-330-2233 · Fax 032-330-3443\n"
+                 "— 서명 —\n천일정기화물자동차 (주)\nSCM사업본부 자동차물류사업부 납입1팀 과장 김성규\n"
+                 "주소 : 인천 부평구 부평대로 233 · TEL 032-330-2233 · Fax 032-330-3443\n\n"
+                 "Hi CHUNIL, High green\nThe Next 100\n"
                  "본 메일은 지정된 수신인에게만 수신이 허용됩니다.")
     cleaned = sm.clean_body(sign_body)
-    check("본문 서명·면책 문구 제거",
-          "재고실사 결과" in cleaned and not any(k in cleaned for k in ("TEL", "Fax", "지정된 수신인", "천일정기화물자동차 (주)")),
-          repr(cleaned[-80:]))
+    # 2026-11-24 사용자 정정 — 직원 서명(이름·직급·연락처)은 보여야 하고, 회사 슬로건·기밀 면책만 뺀다
+    check("본문 서명 유지·슬로건/면책 제거",
+          "재고실사 결과" in cleaned
+          and all(k in cleaned for k in ("— 서명 —", "천일정기화물자동차 (주)", "김성규", "TEL 032-330-2233", "Fax 032-330-3443"))
+          and not any(k in cleaned for k in ("Hi CHUNIL", "High green", "The Next 100", "지정된 수신인")),
+          repr(cleaned[-120:]))
 
     class _ImgSource:
         def fetch_bytes(self, url, *, cap=400_000):

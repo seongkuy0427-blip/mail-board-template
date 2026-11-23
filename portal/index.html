@@ -361,6 +361,11 @@
   .side-card .sc-m{font-size:10.5px; color:var(--ink-3); margin-top:3px; line-height:1.45; word-break:break-word}
   .side-card .sc-x{flex:none; width:20px; height:20px; border-radius:6px; border:1px solid var(--line); background:#fff; color:var(--red); font-size:10px; line-height:1; cursor:pointer; padding:0}
   .side-card .sc-x:hover{background:var(--red-weak)}
+  /* 📅 옮기기 — 등록한 메일 카드에서 날짜만 바꾼다 */
+  .side-card .sc-mv{flex:none; height:20px; padding:0 6px; border-radius:6px; border:1px solid #dcdef5; background:#fff;
+    color:#3f4780; font-family:inherit; font-size:10px; font-weight:600; line-height:1; cursor:pointer; white-space:nowrap}
+  .side-card .sc-mv:hover{background:var(--brand-weak); border-color:var(--brand)}
+  .side-card .sc-mv.on{background:var(--brand); border-color:var(--brand); color:#fff}
   .side-card.mail{border-left:2px solid var(--brand)}
   .side-card.cus{border-left:2px solid var(--orange)}
   .cal-top{display:flex; align-items:center; gap:8px; margin-bottom:8px}
@@ -626,6 +631,10 @@
   .sub-h{display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--ink-3);
     margin:11px 0 7px; padding-top:9px; border-top:1px solid var(--line-2)}
   .sub-h .cnt{font-weight:500; font-size:10.5px}
+  /* 📎 첨부파일 옆 — 웹메일 원문에서 바로 내려받기 */
+  .sub-h .att-open{margin-left:auto; font-size:10.4px; font-weight:600; color:var(--brand); text-decoration:none;
+    padding:2px 7px; border:1px solid #dcdef5; border-radius:6px; background:#fff; white-space:nowrap}
+  .sub-h .att-open:hover{background:var(--brand-weak); border-color:var(--brand)}
   .dr-meta-top{margin:0 0 7px}
   /* 원문 상단 메타 — 발신 · 수신(To) · 참조(CC) */
   .dr-addr{border:1px solid var(--line); background:#fafafa; border-radius:8px; padding:8px 11px; margin:0 0 10px; font-size:11.3px; line-height:1.6}
@@ -2697,11 +2706,30 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
      📅 캘린더 버튼으로 직접 등록한 메일만 보여준다 (localStorage mb_cal_items_v1). */
   function shortTitle(it) { const t = (it.title || "").replace(/\s*\(.*?\)\s*/g, " ").trim(); return t.length > 12 ? t.slice(0, 12) + "\u2026" : t; }
   /* 오른쪽 상세 패널 — 선택한 날짜(없으면 오늘)의 메일 일정 + 직접 일정 */
+  /* 📅 등록한 메일 카드의 옮기기 인라인 폼 상태 — 60초 자동 갱신에도 입력값을 잃지 않게 */
+  let CAL_MOVE = null, CAL_MOVE_DRAFT = "";
   function sideCardMail(it) {
-    return '<div class="side-card mail" data-open="' + esc(it.id) + '" role="button" tabindex="0" title="누르면 메일 상세 열기">' +
+    const moving = CAL_MOVE === it.id;
+    return '<div class="side-card mail' + (moving ? " open" : "") + '" data-open="' + esc(it.id) + '" role="button" tabindex="0" title="누르면 메일 상세 열기">' +
       '<div class="sc-top"><span class="sc-t">' + esc(it.title) + '</span>' +
+      '<button type="button" class="sc-mv' + (moving ? " on" : "") + '" data-cal-move="' + esc(it.id) + '" title="제목은 그대로 두고 등록 날짜만 다른 날로 옮깁니다">📅 옮기기</button>' +
       '<button type="button" class="sc-x" data-cal-tog="' + esc(it.id) + '" title="캘린더에서 빼기" aria-label="캘린더에서 빼기">✕</button></div>' +
-      '<div class="sc-m">' + esc(it.sender) + " · " + esc((it.receivedAt || "").slice(0, 10)) + '</div></div>';
+      '<div class="sc-m">' + esc(it.sender) + " · " + esc((it.receivedAt || "").slice(0, 10)) +
+        (calDate(it) ? " · 📅 " + esc(calDate(it)) : "") + '</div>' +
+      (moving ? calMoveFormHtml(it) : "") + '</div>';
+  }
+  function calMoveFormHtml(it) {
+    const cur = calDate(it) || calDefaultDate(it);
+    const d = (CAL_MOVE === it.id && CAL_MOVE_DRAFT) ? CAL_MOVE_DRAFT : cur;
+    const now = new Date(), dow = now.getDay(), toMon = ((8 - dow) % 7) || 7;
+    const chips = [["오늘", todayY()], ["내일", ymd(addDays(now, 1))], ["모레", ymd(addDays(now, 2))],
+      ["+1주", ymd(addDays(now, 7))], ["다음 주 월", ymd(addDays(now, toMon))]];
+    return '<form class="cus-form" data-cal-move-form="' + esc(it.id) + '" autocomplete="off">' +
+      '<span class="cf-lab">📅 날짜 옮기기</span>' +
+      '<input type="date" class="cf-date" value="' + esc(d) + '" aria-label="옮길 날짜">' +
+      '<span class="cf-act"><button type="submit" class="primary">저장</button><button type="button" data-cal-cancel="1">취소</button></span>' +
+      '<div class="cf-chips">' + chips.map(([lab, v]) => '<button type="button" data-cal-quick="' + v + '"' + (v === d ? ' class="on"' : "") + '>' + lab + '</button>').join("") + '</div>' +
+      '</form>';
   }
   function sideCardCus(c) {
     const on = activeCus() && activeCus().id === c.id;
@@ -2715,6 +2743,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   function renderCalSide() {
     const date = view.day || todayY(), dd = parseYmd(date);
     const mails = calItems().filter((x) => calDate(x) === date);
+    /* 옮기기 폼은 그 카드가 보이는 동안만 — 다른 날짜로 넘어가면 조용히 닫는다 */
+    if (CAL_MOVE && !mails.some((m) => m.id === CAL_MOVE)) { CAL_MOVE = null; CAL_MOVE_DRAFT = ""; }
     const cus = cusFor(date);
     $("calSideTitle").textContent = date + (dd ? " (" + DOW[dd.getDay()] + ")" : "");
     $("calSideN").textContent = (mails.length + cus.length) + "건";
@@ -2736,14 +2766,44 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   const calDate = (it) => calLoad()[it.id] || null;
   const calItems = () => items().filter((it) => !!calDate(it));
   const calCount = () => calItems().length;
+  /* ---------------- 본문·제목 속 마감일 ----------------
+     AI 분석이 없거나 실패해 기본 모드로 돌아가도, `제출 기한 : 12월 2일` · `마감 : 12/2` ·
+     `~ 12/2 까지` · `회신 기한 12/2` 처럼 본문에 적힌 기한을 직접 읽어 캘린더 기본 날짜로 쓴다.
+     v1.2.5 이전 수집분은 `<span>11</span>월` 이 `11\n월` 로 찢겨 있어도 \s 가 줄바꿈을 먹는다. */
+  const MD_ONE = /(?<!\d)(1[0-2]|0?[1-9])\s*[\/월.-]\s*(3[01]|[12]\d|0?[1-9])(?:\s*일)?(?!\d)/;
+  const DL_BEFORE = /(?:제출\s*기한|회신\s*기한|보고\s*기한|제출\s*일|회신\s*일|마감\s*(?:일|기한|일자)?|납기(?:일)?|기한)\s*(?:은|는|이|가|을|를|:)?\s*[:：~∼\-–]?\s*$/;
+  const DL_AFTER = /^\s*(?:\([^)]{1,6}\)|\[[^\]]{1,6}\])?\s*(?:까지|까지임|까지입니다|까지\s*(?:제출|회신|송부))/;
+  function mdYmd(m, refY) {
+    return String(refY || todayY().slice(0, 4)) + "-" + m[1].padStart(2, "0") + "-" + m[2].padStart(2, "0");
+  }
+  /* 글 속에서 '기한·마감·~까지' 가 붙은 날짜를 찾는다 → YYYY-MM-DD (없으면 null) */
+  function deadlineInText(text, ref) {
+    const s = String(text || "");
+    if (!s) return null;
+    const re = new RegExp(MD_ONE.source, "g");
+    const refY = String(ref || todayY()).slice(0, 4) || todayY().slice(0, 4);
+    const refD = parseYmd(String(ref || todayY()).slice(0, 10));
+    let m;
+    while ((m = re.exec(s))) {
+      const before = s.slice(Math.max(0, m.index - 24), m.index);
+      const after = s.slice(re.lastIndex, re.lastIndex + 12);
+      if (!DL_BEFORE.test(before) && !DL_AFTER.test(after)) continue;
+      const got = mdYmd(m, refY);
+      const dd = parseYmd(got);
+      /* 12월에 받은 `1월 5일` 은 내년 — 반년 넘게 과거면 다음 해로 본다 */
+      if (dd && refD && (refD - dd) > 180 * 86400000) return mdYmd(m, Number(refY) + 1);
+      return got;
+    }
+    return null;
+  }
   function calDefaultDate(it) {
     if (dueOf(it)) return dueOf(it);
+    const ref = (it && it.receivedAt) || todayY();
     const t = String((it && it.title) || "");
-    const m = /(?<!\d)(1[0-2]|0?[1-9])\s*[\/월.-]\s*(3[01]|[12]\d|0?[1-9])(?:\s*일)?(?!\d)/.exec(t);
-    if (m) {
-      const yr = String((it && it.receivedAt) || todayY()).slice(0, 4) || todayY().slice(0, 4);
-      return yr + "-" + m[1].padStart(2, "0") + "-" + m[2].padStart(2, "0");
-    }
+    const m = MD_ONE.exec(t);
+    if (m) return mdYmd(m, String(ref).slice(0, 4) || todayY().slice(0, 4));
+    const bodyDl = deadlineInText(((it && it.summary) || "") + "\n" + ((it && it.bodyText) || ""), ref);
+    if (bodyDl) return bodyDl;
     return todayY();
   }
   /* 행·드로어의 📅 캘린더 — 누르면 등록(기본 마감일 또는 오늘), 다시 누르면 해제 */
@@ -2767,6 +2827,42 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     renderCalendar(); renderKpi(); renderList();
     if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
     toast("📅 등록 날짜를 " + date + "(으)로 바꿨습니다");
+  }
+  /* 📅 등록한 메일 카드의 ‘옮기기’ — 제목은 그대로 두고 등록 날짜만 바꾼다 */
+  function calMoveOpen(id) {
+    const it = byId(id);
+    if (!it) return;
+    CAL_MOVE = it.id;
+    CAL_MOVE_DRAFT = calDate(it) || calDefaultDate(it);
+    renderCalSide();
+    const el = document.querySelector("form[data-cal-move-form] .cf-date");
+    if (el) { try { el.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function calMoveClose() {
+    CAL_MOVE = null; CAL_MOVE_DRAFT = "";
+    renderCalSide();
+  }
+  function calQuickPick(btn) {
+    const v = btn && btn.getAttribute("data-cal-quick");
+    const form = btn && btn.closest("form[data-cal-move-form]");
+    if (!v || !form) return;
+    CAL_MOVE_DRAFT = v;
+    const inp = form.querySelector(".cf-date"); if (inp) inp.value = v;
+    form.querySelectorAll("[data-cal-quick]").forEach((b) => b.classList.toggle("on", b.getAttribute("data-cal-quick") === v));
+  }
+  function calMoveDate(id, date) {
+    const it = byId(id);
+    if (!it) return false;
+    const d = String(date || "").trim();
+    if (!d) { toast("옮길 날짜를 골라 주세요"); return false; }
+    const prev = calDate(id);
+    const m = calLoad(); m[id] = d; calSave();
+    CAL_MOVE = null; CAL_MOVE_DRAFT = "";
+    cusGoTo(d);                    /* 그 날짜·월로 달력·사이드를 따라가게 */
+    renderCalendar(); renderKpi(); renderList();
+    if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
+    toast("📅 등록 날짜를 옮겼습니다 — " + (prev && prev !== d ? prev + " → " : "") + d + " · " + shortTitle(it));
+    return true;
   }
 
   /* ---------------- 📌 직접 일정 (메일과 무관한 개인·구두 일정) ----------------
@@ -2980,6 +3076,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     view.day = date;
     view.ym = { y: dd.getFullYear(), m: dd.getMonth() };
     view.calOpen = true;
+    view.kpi = "";          /* 날짜를 따라가면 KPI 모아보기는 해제 — 그 날짜 목록을 보여준다 */
   }
   function cusUpdate(id, date, title, memo) {
     const c = cusById(id); if (!c) return false;
@@ -3333,6 +3430,40 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       '<div class="rows">' + sortList(g.items.slice()).map(rowHtml).join("") + "</div>").join("");
   }
 
+  /* ---------------- 📅 고른 날짜의 메일 모아 보기 ----------------
+     캘린더에서 날짜를 누르면 아래 목록에 그 날 **등록한(📅)** 메일과 **마감인** 메일을 모두 모은다.
+     `📌 개인/구두` 일정이 없는 날에도 이 목록이 나오게, 탭 구분 없이 items() 전체에서 찾는다. */
+  function dayMailList(day) {
+    if (!day) return [];
+    return sortList(items().filter((it) => calDate(it) === day || dueOf(it) === day));
+  }
+  function renderDayList(day) {
+    const all = dayMailList(day);
+    let list = all;
+    if (view.replyOnly) list = list.filter((it) => replyOf(it) === "needs_reply");
+    /* ✅ 확인한 메일은 기본 목록처럼 숨긴다 — ‘완료 포함’이나 검색어가 있으면 다시 보인다 */
+    if (!view.showDone && !view.q.trim()) list = list.filter((it) => !isDone(it));
+    const shown = list.filter(matches);
+    const reg = all.filter((it) => calDate(it) === day).length;
+    const due = all.filter((it) => calDate(it) !== day && dueOf(it) === day).length;
+    $("dayChipText").textContent = "📅 " + day + " 등록·마감 메일 " + all.length + "건";
+    $("dayChip").classList.add("on");
+    const bkey = bulkTab();
+    if (bkey) bulkPrune(bkey, shown.map((it) => it.id));
+    let html = '<div class="sec-title">📅 ' + esc(day) + ' 메일 <span class="hint">📅 캘린더 등록 ' + reg + "건 · 마감 " + due + "건" +
+      (view.q.trim() ? " · ‘" + esc(view.q.trim()) + "’ 검색 " + shown.length + "건" : "") + "</span></div>";
+    if (shown.length) {
+      html += bulkBarHtml(shown);
+      html += '<div class="rows">' + shown.map(rowHtml).join("") + "</div>";
+    } else {
+      html += '<div class="empty">' + (all.length
+        ? "검색 조건에 맞는 메일이 없습니다." + (view.showDone ? "" : "<br>✅ 확인한 메일은 <b>완료 포함</b>을 켜면 나옵니다.")
+        : "이 날짜에 등록했거나 마감인 메일이 없습니다.<br>메일 행 오른쪽의 <b>📅</b>를 누르면 그 날짜로 캘린더에 등록됩니다.") + "</div>";
+    }
+    $("listWrap").innerHTML = html;
+    paintNewClear();
+  }
+
   function currentList() {
     if (view.kpi) return kpiListForView();
     let base = view.tab === "p1" ? p1Items()
@@ -3466,6 +3597,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       paintNewClear();
       return;
     }
+    /* 📅 캘린더에서 고른 날짜 — 개인/구두 일정이 없어도 그 날짜의 등록·마감 메일을 보여준다 */
+    if (view.day) { renderDayList(view.day); return; }
     const q = view.q.trim(), main = currentList();
     /* 선택 상태는 지금 보이는 행에만 유효 — 사라진 건은 조용히 정리 */
     const bkey = bulkTab();
@@ -4509,6 +4642,63 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (next.state === "done") toast(next.rows.length ? "✨ AI가 참고할 과거 사례 " + next.rows.length + "건을 골랐습니다" : "✨ 맥락상 유사한 과거 사례가 없습니다", 2600);
   }
 
+  /* ---------------- 본문 표시 정리 ----------------
+     v1.2.5 이전 수집분의 bodyText 는 웹메일 HTML 조각 경계마다 줄이 바뀌어
+     `<span>11</span>월 <span>24</span>일` 이 `11\n월\n24\n일` 처럼 찢겨 저장되어 있다.
+     화면에서만 짧은 파편 줄을 앞 줄에 이어 붙인다 — 단락 구분(빈 줄)과 정상적인 문장 줄바꿈은 그대로 둔다.
+     (서명은 일부러 감추지 않는다 — 직원 이름·직급·연락처는 보여야 한다) */
+  const BODY_LIST_HEAD = /^\s*(?:[-•·○◦▶※*#>]|\(?\d{1,2}[).]\s|[①-⑳]|[가-힣]\.\s)/;
+  function bodyJoinTight(a, b) {
+    if (/\d$/.test(a) && /^[월일년시분초대개건명원층호차%]/.test(b)) return a + b;   /* 11 + 월 → 11월 */
+    return a + " " + b;
+  }
+  function formatBodyText(t) {
+    if (t == null || t === "") return "";
+    const out = [];
+    for (const raw of String(t).replace(/\r\n?/g, "\n").split("\n")) {
+      const line = raw.replace(/\s+$/, "");
+      if (!line.trim()) { if (out.length && out[out.length - 1] !== "") out.push(""); continue; }
+      const prev = out.length ? out[out.length - 1] : "";
+      const cur = line.trim();
+      /* ① 숫자 + 단위(`24` + `일 까지`) — 길이와 상관없이 붙인다 */
+      const unitTail = !!prev && /\d$/.test(prev) && /^[월일년시분초대개건명원층호차%]/.test(cur);
+      /* ② 자투리 줄(`11`·`월`·`3T`) — 앞 줄에 이어 붙인다 */
+      const stub = !!prev && (cur.length <= 2 || prev.trim().length <= 3) &&
+        !/[.?!:;。…]$/.test(prev.trim()) && !BODY_LIST_HEAD.test(line);
+      if (prev && (unitTail || stub)) {
+        out[out.length - 1] = bodyJoinTight(prev.replace(/\s+$/, ""), cur);
+        continue;
+      }
+      out.push(line);
+    }
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /* 🖼️ 저장된 본문 사진 안전장치 — 예전 수집분의 슬로건 배너·소형 아이콘은 화면에서도 숨긴다.
+     (서버가 board.json 을 정리하는 것과 별개로, 로드된 실제 픽셀 크기로 한 번 더 거른다) */
+  function mbIsBannerOrIcon(w, h) {
+    if (!w || !h) return false;
+    /* 폭 700 미만의 납작한 띠만 슬로건 배너 — 1200x110 같은 표 캡처는 살린다 */
+    return w <= 130 || h <= 70 || (w < 700 && h <= 140 && w >= 2.5 * h);
+  }
+  function mbImgGuard(img) {
+    if (!img || !mbIsBannerOrIcon(img.naturalWidth, img.naturalHeight)) return;
+    const cell = img.closest ? img.closest(".img-cell") : null;
+    if (!cell || cell.style.display === "none") return;
+    cell.style.display = "none";
+    const grid = cell.parentElement;
+    if (!grid) return;
+    const left = [...grid.querySelectorAll(".img-cell")].filter((c) => c.style.display !== "none").length;
+    const cnt = document.querySelector("[data-img-count]");
+    if (cnt) cnt.textContent = "· " + left + "장";
+    if (!left) {
+      grid.style.display = "none";
+      const hint = grid.parentElement && grid.parentElement.querySelector(".img-hint");
+      if (hint) hint.style.display = "none";
+    }
+  }
+  window.mbImgGuard = mbImgGuard;      /* <img onload="mbImgGuard(this)"> 에서 부를 수 있게 */
+
   function drawerHtml(it) {
     const st = stateOf(it), rows = it.actionItems || [], thr = threadOf(it), r = replyOf(it);
     /* 유사 · 과거 사례 (색인은 처음 한 번만 만들고 메일별 결과는 기억한다) */
@@ -4538,7 +4728,9 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       ? '<div class="att-list">' + atts.map((a) => '<span class="att">📎 <span class="nm">' + esc(a.name) + '</span><span class="sz">' + esc(a.size || "") + "</span></span>").join("") + "</div>"
       : (it.attachmentsUnverified ? '<div class="att-none">첨부 여부·파일명은 웹메일 원본에서 확인 (대시보드 미수집)</div>' : '<div class="att-none">첨부파일 없음 (본문 인라인 자료)</div>');
     const attSum = it.attachmentSummary ? '<div class="att-sum">📎 ' + esc(it.attachmentSummary) + "</div>" : "";
-    const attBlock = '<div class="sub-h">📎 첨부파일 <span class="cnt">· ' + atts.length + "건</span></div>" + attHtml + attSum;
+    const attBlock = '<div class="sub-h">📎 첨부파일 <span class="cnt">· ' + atts.length + "건</span>" +
+      (it.mailLink ? '<a class="mini att-open" href="' + esc(it.mailLink) + '" target="_blank" rel="noopener" title="웹메일 원문을 열어 첨부파일을 내려받습니다">웹메일 원문에서 받기 ↗</a>' : "") +
+      "</div>" + attHtml + attSum;
 
     const threadHtml = thr.length > 1
       ? '<div class="dr-sec"><div class="sec-h">🕒 히스토리</div><details class="thread"' + (it.thread.length <= 4 ? " open" : "") + '><summary>이전 메일 ' + (thr.length - 1) + "건 타임라인 (총 " + thr.length + "건)</summary>" +
@@ -4555,15 +4747,15 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
           r.map((c) => '<td' + (/^[\d,]+$/.test(String(c || "")) ? ' class="num"' : "") + ">" + esc(c) + "</td>").join("") + "</tr>").join("") +
         "</tbody></table>"
       : "";
-    const body = tblHtml + (it.bodyText ? '<div class="body-text">' + esc(it.bodyText) + "</div>"
+    const body = tblHtml + (it.bodyText ? '<div class="body-text">' + esc(formatBodyText(it.bodyText)) + "</div>"
       : (tblHtml ? "" : '<div class="att-none">본문은 대시보드에 저장하지 않았습니다. 아래 ‘웹메일 원본 열기’에서 확인하세요.</div>'));
 
     const imgs = it.images || [];
     const imgHtml = imgs.length
-      ? '<div class="sub-h">🖼️ 본문 사진 <span class="cnt">· ' + imgs.length + "장</span></div>" +
+      ? '<div class="sub-h">🖼️ 본문 사진 <span class="cnt" data-img-count>· ' + imgs.length + "장</span></div>" +
         '<div class="img-grid' + (imgs.length === 1 ? " single" : "") + '">' +
         imgs.map((im, i) => '<button type="button" class="img-cell" data-zoom="' + esc(it.id) + '" data-i="' + i + '" aria-label="' + esc((im.name || "사진") + " 크게 보기") + '">' +
-          '<img src="' + esc(im.dataUrl) + '" alt="' + esc(im.name || "메일 본문 사진") + '" loading="lazy">' +
+          '<img src="' + esc(im.dataUrl) + '" alt="' + esc(im.name || "메일 본문 사진") + '" loading="lazy" onload="mbImgGuard(this)">' +
           '<span class="zoom">🔍 크게</span></button>').join("") + "</div>" +
         '<div class="img-hint">사진을 누르면 원본 크기로 크게 볼 수 있습니다.</div>'
       : "";
@@ -5002,7 +5194,10 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const key = c.dataset.day;
     view.day = (view.day === key) ? null : key;
     view.cusId = null;
+    CAL_MOVE = null; CAL_MOVE_DRAFT = "";
     cusFormReset();
+    /* 날짜를 고르면 KPI 모아보기는 풀고 그 날짜 목록을 보여준다 */
+    if (view.day && view.kpi) { view.kpi = ""; renderKpi(); }
     if (view.day && $("cusDate")) $("cusDate").value = view.day;
     renderCalendar();
     renderList();
@@ -5016,6 +5211,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   /* ✏️ 수정 · 📅 옮기기 폼 — 어느 위치(카드·배너)에서든 같은 방식으로 처리 */
   document.addEventListener("submit", (e) => {
+    const cf = e.target && e.target.closest ? e.target.closest("form[data-cal-move-form]") : null;
+    if (cf) {
+      e.preventDefault();
+      calMoveDate(cf.getAttribute("data-cal-move-form"), cf.querySelector(".cf-date").value);
+      return;
+    }
     const f = e.target && e.target.closest ? e.target.closest("form[data-cus-form]") : null;
     if (!f) return;
     e.preventDefault();
@@ -5025,6 +5226,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   /* 60초 자동 갱신으로 다시 그려져도 입력 중인 내용이 날아가지 않게 초안을 따라가며 저장 */
   document.addEventListener("input", (e) => {
+    const cf = e.target && e.target.closest ? e.target.closest("form[data-cal-move-form]") : null;
+    if (cf && CAL_MOVE) { const d = cf.querySelector(".cf-date"); CAL_MOVE_DRAFT = d ? d.value : ""; return; }
     const f = e.target && e.target.closest ? e.target.closest("form[data-cus-form]") : null;
     if (!f) return;
     const date = f.querySelector(".cf-date"), title = f.querySelector(".cf-title"), memo = f.querySelector(".cf-memo");
@@ -5032,9 +5235,11 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     else if (CUS_EDIT === f.getAttribute("data-cus-id")) CUS_DRAFT = { date: date ? date.value : "", title: title ? title.value : "", memo: memo ? memo.value : "" };
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || (!CUS_EDIT && !CUS_MOVE)) return;
+    if (e.key !== "Escape" || (!CUS_EDIT && !CUS_MOVE && !CAL_MOVE)) return;
     const t = e.target;
-    if (t && t.closest && t.closest("form[data-cus-form]")) { e.stopPropagation(); cusFormClose(); }
+    if (t && t.closest && t.closest("form[data-cus-form]")) { e.stopPropagation(); cusFormClose(); return; }
+    if (t && t.closest && t.closest("form[data-cal-move-form]")) { e.stopPropagation(); calMoveClose(); return; }
+    if (CAL_MOVE) calMoveClose();
   }, true);
   $("dayClear").addEventListener("click", () => { view.day = null; view.cusId = null; cusFormReset(); renderCalendar(); renderList(); });
 
@@ -5043,6 +5248,13 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (cl) { e.preventDefault(); e.stopPropagation(); cusDel(cl.dataset.cusDel); return; }
     if (cusActionClick(e)) { e.preventDefault(); e.stopPropagation(); return; }
     if (e.target.closest("form[data-cus-form]")) return;  /* 폼 안 입력은 카드 선택으로 번지지 않게 */
+    const mv = e.target.closest("[data-cal-move]");
+    if (mv) { e.preventDefault(); e.stopPropagation(); calMoveOpen(mv.dataset.calMove); return; }
+    const qk = e.target.closest("[data-cal-quick]");
+    if (qk) { e.preventDefault(); e.stopPropagation(); calQuickPick(qk); return; }
+    const cc = e.target.closest("[data-cal-cancel]");
+    if (cc) { e.preventDefault(); e.stopPropagation(); calMoveClose(); return; }
+    if (e.target.closest("form[data-cal-move-form]")) return;
     const cs = e.target.closest("[data-cus-sel]");
     if (cs) { e.preventDefault(); e.stopPropagation(); cusFormReset(); view.cusId = cs.dataset.cusSel; renderCalendar(); renderList(); return; }
     const ct = e.target.closest("[data-cal-tog]");
