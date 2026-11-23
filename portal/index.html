@@ -694,7 +694,25 @@
   .case-ai:disabled{opacity:.55; cursor:default}
   .case-ai.on{background:#efe8ff; border-color:#c9b8ee}
   .case-tag.ai{color:#6d3fd1; background:#f3edff; border-color:#ded2f7}
-  .case-why{display:block; margin-top:5px; padding-top:5px; border-top:1px dashed var(--line); font-size:10.8px; line-height:1.45; color:var(--ink-2)}
+  /* ✨ AI 유사도 — 큰 % 배지 · 점수대 색(85↑ 초록 / 65~84 파랑 / 65↓ 주황) · 게이지 바 */
+  .case-score{display:inline-flex; align-items:baseline; gap:0; padding:1px 7px 2px; border-radius:7px;
+    border:1px solid transparent; font-variant-numeric:tabular-nums; line-height:1.12}
+  .case-score b{font-size:15.5px; font-weight:800; letter-spacing:-.04em}
+  .case-score .pc{font-size:10px; font-weight:700}
+  .case-score.hi{color:#15803d; background:#f0fdf4; border-color:#bbf7d0}
+  .case-score.mid{color:#1d4ed8; background:#eff6ff; border-color:#bfdbfe}
+  .case-score.lo{color:#b45309; background:#fffbeb; border-color:#fde68a}
+  .case-lv{font-size:10.2px; font-weight:700; letter-spacing:-.01em; white-space:nowrap}
+  .case-lv.hi{color:#15803d} .case-lv.mid{color:#1d4ed8} .case-lv.lo{color:#b45309}
+  .case-gauge{display:block; height:5px; margin:0 0 5px; border-radius:999px; background:#f1f1f3; overflow:hidden}
+  .case-gauge i{display:block; height:100%; border-radius:999px; transform-origin:left center;
+    animation:casebar .42s cubic-bezier(.22,.61,.36,1) both}
+  .case-gauge.hi i{background:linear-gradient(90deg,#4ade80,#16a34a)}
+  .case-gauge.mid i{background:linear-gradient(90deg,#60a5fa,#2563eb)}
+  .case-gauge.lo i{background:linear-gradient(90deg,#fbbf24,#d97706)}
+  @keyframes casebar{from{transform:scaleX(0)} to{transform:scaleX(1)}}
+  .case-why{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    margin-top:4px; font-size:10.7px; line-height:1.5; color:var(--ink-2)}
   .case-why b{color:#6d3fd1; font-weight:700}
   .case-loading{display:flex; align-items:center; gap:7px; font-size:11.4px; color:var(--ink-2)}
   .case-loading i{width:11px; height:11px; border-radius:50%; border:2px solid #dcd0f5; border-top-color:#6d3fd1;
@@ -1225,6 +1243,7 @@
   @media (prefers-reduced-motion:reduce){
     #listWrap.mb-in, #drawer.dr-anim .dr-head, #drawer.dr-anim .dr-body,
     #briefModal.on .bf-card, #briefModal.on .bf-back,
+    .case-gauge i,
     .badge.pop, .reply-btn.pop, .dr-pin.pop, .mini.pop{animation:none !important}
     button.kpi-card:active, .seg button:active, .chip:active{transform:none !important}
     .row.leaving{transition:none !important; will-change:auto}
@@ -4335,14 +4354,47 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
      결과는 서버(data/users/<id>/similar_cache.json)에 메일별로 저장되어 두 번째부터는 0 호출. */
   const CASE_AI = new Map();          /* mailId → { state: loading|done|error, rows, message, cached } */
 
+  /* 유사도 점수 → 표시값·등급. 서버는 1~100 정수를 주지만, 어떤 값이 와도 0~100 안으로 가둔다.
+     85% 이상 매우 유사(초록) · 65~84% 관련 높음(파랑) · 65% 미만 참고(주황) */
+  const CASE_AI_TIERS = [
+    { min: 85, key: "hi", label: "매우 유사" },
+    { min: 65, key: "mid", label: "관련 높음" },
+    { min: 0, key: "lo", label: "참고" },
+  ];
+  function caseAiScore(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    if (!isFinite(n)) return null;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  }
+  function caseAiTier(score) {
+    return CASE_AI_TIERS.find((t) => score >= t.min) || CASE_AI_TIERS[CASE_AI_TIERS.length - 1];
+  }
+  function caseAiScoreHtml(score) {
+    if (score === null) return '<span class="case-tag ai">✨ AI 선별</span>';
+    const t = caseAiTier(score);
+    return '<span class="case-score ' + t.key + '"><b>' + score + '</b><span class="pc">%</span></span>' +
+      '<span class="case-lv ' + t.key + '">' + t.label + "</span>";
+  }
+  function caseAiGaugeHtml(score) {
+    if (score === null) return "";
+    const t = caseAiTier(score);
+    return '<span class="case-gauge ' + t.key + '" role="img" aria-label="원문 대비 유사도 ' + score + '퍼센트 · ' + t.label + '">' +
+      '<i style="width:' + score + '%"></i></span>';
+  }
+
   function caseAiRowsHtml(rows) {
-    return rows.map((r) => '<button type="button" class="case-row" data-case="' + esc(r.id) + '">' +
-      '<span class="case-top"><span class="case-tag ai">✨ AI ' + esc(String(r.score || "")) + '</span>' +
-      '<span class="case-date">' + esc(caseShortDate(r.date)) + "</span></span>" +
-      '<span class="case-ttl">' + esc(r.title) + "</span>" +
-      '<span class="case-from">' + esc(r.from) + "</span>" +
-      (r.reason ? '<span class="case-why">✨ <b>이래서 참고</b> · ' + esc(r.reason) + "</span>" : "") +
-      "</button>").join("");
+    return rows.map((r) => {
+      const score = caseAiScore(r.score);
+      return '<button type="button" class="case-row" data-case="' + esc(r.id) + '">' +
+        '<span class="case-top">' + caseAiScoreHtml(score) +
+        '<span class="case-date">' + esc(caseShortDate(r.date)) + "</span></span>" +
+        caseAiGaugeHtml(score) +
+        '<span class="case-ttl">' + esc(r.title) + "</span>" +
+        '<span class="case-from">' + esc(r.from) + "</span>" +
+        (r.reason ? '<span class="case-why">✨ <b>이래서 참고</b> · ' + esc(r.reason) + "</span>" : "") +
+        "</button>";
+    }).join("");
   }
 
   function caseAiBodyHtml(it) {
