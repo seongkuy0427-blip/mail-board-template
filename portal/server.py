@@ -1116,6 +1116,11 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             sent = sent[: CFG["max_new"]]
 
         if not inbox and not sent and not first:
+            try:      # 새 메일이 없어도 예전 '본문 복붙' 요약은 3인칭으로 한 번 정리한다 (v1.2.7)
+                if sm.refresh_copied_summaries(board["items"], contacts):
+                    atomic_write_json(board_path, board, mode=0o600)
+            except Exception as e:  # noqa: BLE001 - 정리가 실패해도 동기화 상태는 그대로 알린다
+                print(f"[sync] {uid} 요약 정리 실패: {type(e).__name__}", file=sys.stderr)
             set_status(uid, state="ready", phase="done", progress=100,
                        message="새 메일 없음 — 최신 상태입니다", lastSync=board.get("updatedAt"),
                        _persist=True)
