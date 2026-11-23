@@ -695,6 +695,13 @@
     overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
   .case-from{display:block; margin-top:3px; font-size:10.5px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .case-empty{font-size:11.3px; color:var(--ink-3)}
+  /* ✨ AI 실패 시 — 짧은 경고 줄만 얹고 기본 목록은 그대로 보여준다 */
+  .case-warn{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:0 0 7px; padding:6px 9px;
+    font-size:11px; line-height:1.45; color:#8a5300; background:#fffbeb; border:1px solid #fde68a; border-radius:8px}
+  .case-warn span{flex:1 1 180px; min-width:0; word-break:break-word}
+  .case-warn .case-retry{flex:none; padding:3px 9px; border:1px solid #f0c96b; border-radius:6px; background:#fff;
+    color:#8a5300; font-family:inherit; font-size:10.6px; font-weight:700; cursor:pointer}
+  .case-warn .case-retry:hover{background:#fff7e0}
   /* ✨ AI 정밀 분석 — 버튼을 누를 때만 서버가 Gemini 로 후보를 추린다 */
   .case-ai{flex:none; margin-left:auto; height:24px; padding:0 9px; border-radius:6px; border:1px solid #dcd0f5;
     background:#f7f3ff; color:#6d3fd1; font-family:inherit; font-size:10.8px; font-weight:700; cursor:pointer;
@@ -3373,8 +3380,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         "회신이 확인된 건 <b>추적 완료</b>로 바꾸면 대기 건수에서 바로 빠집니다.";
     } else if (view.tab === "pin") {
       note.style.display = "";
-      note.innerHTML = "<b>📌 고정</b>한 메일은 분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 고정을 풀기 전까지 여기서 계속 열람할 수 있습니다. " +
-        "행의 <b>📌</b>을 다시 누르면 고정이 풀립니다.";
+      note.innerHTML = "<b>📌 고정</b>한 메일은 원래 탭에서 빠져 <b>여기 ‘📌 고정’ 탭에만</b> 모입니다(같은 메일이 두 곳에 보이지 않게). " +
+        "분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 남고, 행의 <b>📌</b>을 다시 누르면 고정이 풀려 원래 탭으로 돌아갑니다.";
     } else { note.style.display = "none"; note.innerHTML = ""; }
   }
 
@@ -3397,7 +3404,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         ' aria-label="이 메일 선택 (한꺼번에 확인)" title="선택해서 한꺼번에 확인"></span>' : "") +
       '<span class="' + rankCls + '">' + esc(rankTxt) + "</span>" +
       '<span class="rmain"><span class="rt">' +
-        (pin ? '<span class="pinmark" title="📌 고정됨 — 고정 탭에 계속 남습니다">📌</span>' : "") +
+        (pin ? '<span class="pinmark" title="📌 고정됨 — ‘📌 고정’ 탭에 모여 있습니다(고정을 풀면 원래 탭으로 돌아갑니다)">📌</span>' : "") +
         (isNewMail(it) ? '<span class="newpill" title="새로 들어온 메일 — 열어보거나 ✅ 확인하면 사라집니다">NEW</span>' : "") +
         '<span class="rtitle">' + esc(it.title) + "</span>" +
         (thr > 1 ? '<span class="thr">+' + (thr - 1) + "</span>" : "") + "</span>" +
@@ -4540,11 +4547,20 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }).join("");
   }
 
-  function caseAiBodyHtml(it) {
+  function caseAiBodyHtml(it, rows) {
     const st = CASE_AI.get(it.id);
     if (!st) return "";
     if (st.state === "loading") return '<div class="case-loading"><i></i>AI가 맥락을 분석 중… (최대 20초)</div>';
-    if (st.state === "error") return '<div class="case-empty">' + esc(st.message || "AI 분석에 실패했습니다. 잠시 후 다시 시도해 주세요.") + "</div>";
+    if (st.state === "error") {
+      /* AI 가 한도·키·시간초과로 실패해도 기본 유사 사례 목록은 그대로 보여준다
+         — 에러 문구만 남겨 목록이 통째로 사라지던 문제(2026-11-24 사용자 지적) */
+      const msg = st.message || "AI 분석에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+      const warn = '<div class="case-warn">⚠️ <span>' + esc(msg) + ' — 아래 기본 목록을 먼저 보여드립니다.</span>' +
+        '<button type="button" class="case-retry" data-case-ai="' + esc(it.id) + '">다시 시도</button></div>';
+      const base = (rows && rows.length) ? caseLocalRowsHtml(rows)
+        : '<div class="case-empty">품번·핵심 키워드가 겹치는 과거 메일이 없습니다.</div>';
+      return warn + base;
+    }
     if (!st.rows.length) return '<div class="case-empty">0건 — 맥락상 유사한 과거 사례 없음</div>';
     return '<div class="case-list">' + caseAiRowsHtml(st.rows) + "</div>";
   }
@@ -4570,9 +4586,13 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       : (rows.length ? rows.length + "건" : "찾지 못함");
     const head = '<div class="sec-h"><span class="sec-t">🔗 유사 · 과거 동일 사례</span>' +
       '<span class="cnt">· ' + found + " · 전체 " + total + "건에서</span>" + aiBtn + "</div>";
-    const aiBody = caseAiBodyHtml(it);
+    const aiBody = caseAiBodyHtml(it, rows);
     if (aiBody) return '<div class="dr-sec" id="drCases">' + head + aiBody + caseAiNoteHtml(it) + "</div>";
     if (!rows.length) return '<div class="dr-sec" id="drCases">' + head + '<div class="case-empty">품번·핵심 키워드가 겹치는 과거 메일이 없습니다.</div></div>';
+    return '<div class="dr-sec" id="drCases">' + head + caseLocalRowsHtml(rows) + "</div>";
+  }
+  /* 기본(로컬) 유사 사례 목록 — AI 없이도·AI 실패해도 그대로 보여 준다 */
+  function caseLocalRowsHtml(rows) {
     const cards = rows.map((r) => {
       let tags = "";
       r.codes.slice(0, 2).forEach((c) => {
@@ -4585,7 +4605,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<span class="case-ttl">' + esc(r.title) + "</span>" +
         '<span class="case-from">' + esc(r.from) + "</span></button>";
     }).join("");
-    return '<div class="dr-sec" id="drCases">' + head + '<div class="case-list">' + cards + "</div></div>";
+    return '<div class="case-list">' + cards + "</div>";
   }
   /* 새·미확인 메일 상단의 한 줄 제안 — 누르면 아래 🔗 섹션으로 스크롤 */
   function caseHintHtml(it, rows) {
