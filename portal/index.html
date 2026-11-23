@@ -5608,7 +5608,18 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const headers = PT_ETAG ? { "If-None-Match": PT_ETAG } : {};
     const res = await fetch("/api/data?t=" + Date.now(), { cache: "no-store", headers });
     if (res.status === 401) { const e = new Error("로그인이 만료되었습니다 — 다시 로그인해 주세요"); e.needLogin = true; throw e; }
-    if (res.status === 304) return false;      /* 서버 내용 그대로 — 받을 것도, 다시 그릴 것도 없다 */
+    if (res.status === 304) {
+      /* 304 = 서버 내용 그대로. 받을 것도, 다시 그릴 것도 없다.
+         (첫 로드처럼 아직 DATA 가 없으면 ETag 를 버리고 한 번만 다시 받는다 — 빈 화면 방지) */
+      if (DATA) return false;
+      PT_ETAG = "";
+      const res2 = await fetch("/api/data?t=" + Date.now(), { cache: "no-store" });
+      if (res2.status !== 200) return false;
+      PT_ETAG = res2.headers.get("ETag") || "";
+      DATA = await res2.json();
+      await portalLoadContacts();
+      return true;
+    }
     if (res.status !== 200) {
       if (manual) toast("새 메일을 수집하는 중입니다 — 잠시 후 다시 눌러 주세요");
       return false;
