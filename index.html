@@ -4702,21 +4702,26 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
      (서명은 일부러 감추지 않는다 — 직원 이름·직급·연락처는 보여야 한다) */
   const BODY_LIST_HEAD = /^\s*(?:[-*•·○◦▶▪※#>]|\(?\d{1,2}[).]\s|[①-⑳]|[가-힣]\.\s)/;
   const BODY_SENT_END = /(?:[.?!:;。…~]|다|요|니다|바랍니다|드립니다|세요|함|임|음|\))\s*$/;
-  const BODY_LABEL_HEAD = /^\s*[가-힣A-Za-z][^:\n]{0,11}\s*[:：]\s*\S/;
+  const BODY_LABEL_HEAD = /^\s*[가-힣A-Za-z][^:\n\d]{0,11}\s*[:：]\s*\S/;   /* 07:00 같은 시각은 라벨이 아니다 */
   const BODY_QUOTE_HEAD = /^\s*(?:from|sent|to|cc|bcc|subject|date|보낸\s*사람|받는\s*사람|참조|제목|보낸\s*날짜)\s*[:：]/i;
   const BODY_URL_RE = /(?:https?:\/\/|www\.)\S/i;
   const BODY_ADDR_LINE = /^[^\n]{0,20}(?:대리|과장|차장|부장|사원|팀장|대표|님|제위)\s*[,.]?$/;
-  const BODY_MARK_LINE = /^\s*(?:—|–|-{2,}|={2,})/;
+  const BODY_MARK_LINE = /^\s*(?:—|–|-{2,}|={2,}|\*{3,})/;
+  const BODY_FENCE = /^\s*[*=_\-—–]{3,}\s*$/;   /* ***…*** 구분선만 있는 줄 = 서명 울타리 */
   const BODY_SIG_MARK = /^—\s*서명\s*—/;
   const BODY_UNIT_TAIL = /^[월일년시분초대개건명원층호차%]/;
+  const BODY_JOIN_MAX = 30;      /* 두 줄이 모두 이보다 길면 서로 다른 문장 */
   function bodyKeepsBreak(prev, cur) {
     if (!prev) return true;
     if (/\S\s\s\S/.test(prev) || /\S\s\s\S/.test(cur)) return true;          /* 표 행(칸 사이 두 칸) */
     if (BODY_SENT_END.test(prev)) return true;                               /* 문장이 끝났다 */
-    if (BODY_LIST_HEAD.test(cur) || BODY_LABEL_HEAD.test(cur)) return true;  /* 새 항목·라벨 */
+    if (BODY_LIST_HEAD.test(cur) || BODY_LABEL_HEAD.test(cur)) return true;  /* 새 항목 */
+    if (BODY_LABEL_HEAD.test(prev)) return true;                            /* 라벨 줄 다음은 새 항목 */
     if (BODY_QUOTE_HEAD.test(cur) || BODY_MARK_LINE.test(cur) || BODY_MARK_LINE.test(prev)) return true;
+    if (BODY_FENCE.test(cur) || BODY_FENCE.test(prev)) return true;          /* 서명 울타리 */
     if (BODY_URL_RE.test(cur)) return true;
     if (BODY_ADDR_LINE.test(prev) || BODY_ADDR_LINE.test(cur)) return true;  /* 인사·호칭 줄 */
+    if (prev.trim().length > BODY_JOIN_MAX && cur.trim().length > BODY_JOIN_MAX) return true;  /* 둘 다 긴 줄 = 다른 문장 */
     return false;
   }
   function bodyJoinTight(a, b) {
@@ -4731,6 +4736,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       const line = raw.replace(/\s+$/, "");
       if (!line.trim()) { inSig = false; if (out.length && out[out.length - 1] !== "") out.push(""); continue; }
       const cur = line.trim();
+      if (BODY_FENCE.test(cur)) { inSig = !inSig; out.push(line); continue; }
       const prev = out.length ? out[out.length - 1] : "";
       /* ① 숫자 + 단위(`24` + `일 까지`) — 길이와 상관없이 붙인다 */
       const unitTail = !!prev && /\d$/.test(prev) && BODY_UNIT_TAIL.test(cur);

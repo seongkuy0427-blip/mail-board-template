@@ -1352,15 +1352,17 @@ HARD_PARA = "\x03"           # 글자 없는 빈 블록 = 단락 구분
 #  이어 붙이지 않는(줄바꿈을 유지하는) 조건 — index.html 의 formatBodyText() 와 같은 규칙
 BODY_SENT_END = re.compile(r"(?:[.?!:;。…~]|다|요|니다|바랍니다|드립니다|세요|함|임|음|\))\s*$")
 BODY_LIST_HEAD = re.compile(r"^\s*(?:[-*•·○◦▶▪※#>]|\(?\d{1,2}[).]\s|[①-⑳]|[가-힣]\.\s)")
-BODY_LABEL_HEAD = re.compile(r"^\s*[가-힣A-Za-z][^:\n]{0,11}\s*[:：]\s*\S")
+BODY_LABEL_HEAD = re.compile(r"^\s*[가-힣A-Za-z][^:\n\d]{0,11}\s*[:：]\s*\S")   # `07:00` 같은 시각은 라벨이 아니다
 BODY_QUOTE_HEAD = re.compile(
     r"^\s*(?:from|sent|to|cc|bcc|subject|date|보낸\s*사람|받는\s*사람|참조|제목|보낸\s*날짜)\s*[:：]", re.I)
 BODY_URL_RE = re.compile(r"(?:https?://|www\.)\S", re.I)
 BODY_ADDR_LINE = re.compile(r"^[^\n]{0,20}(?:대리|과장|차장|부장|사원|팀장|대표|님|제위)\s*[,.]?$")
-BODY_MARK_LINE = re.compile(r"^\s*(?:—|–|-{2,}|={2,})")
+BODY_MARK_LINE = re.compile(r"^\s*(?:—|–|-{2,}|={2,}|\*{3,})")
+BODY_FENCE = re.compile(r"^\s*[*=_\-—–]{3,}\s*$")          # ***…*** 처럼 구분선만 있는 줄 = 서명 울타리
 BODY_SIG_MARK = re.compile(r"^—\s*서명\s*—")
 BODY_UNIT_TAIL = re.compile(r"^[월일년시분초대개건명원층호차%]")
 BODY_CELL_GAP = "  "          # 표 행 — <td> 칸 사이는 두 칸 공백
+BODY_JOIN_MAX = 30            # 두 줄이 모두 이보다 길면 서로 다른 문장으로 본다
 
 
 def _body_keeps_break(prev: str, cur: str) -> bool:
@@ -1371,14 +1373,20 @@ def _body_keeps_break(prev: str, cur: str) -> bool:
         return True
     if BODY_SENT_END.search(prev):                                 # 문장이 끝났다
         return True
-    if BODY_LIST_HEAD.match(cur) or BODY_LABEL_HEAD.match(cur):    # 새 항목·`품번:` 라벨
+    if BODY_LIST_HEAD.match(cur) or BODY_LABEL_HEAD.match(cur):    # 새 항목
+        return True
+    if BODY_LABEL_HEAD.match(prev):                                # `기한: 12/2` 같은 라벨 줄 다음은 새 항목
         return True
     if BODY_QUOTE_HEAD.match(cur) or BODY_MARK_LINE.match(cur) or BODY_MARK_LINE.match(prev):
+        return True
+    if BODY_FENCE.match(cur) or BODY_FENCE.match(prev):            # 서명 울타리(***…***)
         return True                                               # 인용 헤더·서명/인용 구분선
     if BODY_URL_RE.search(cur):                                    # 주소
         return True
     if BODY_ADDR_LINE.match(prev) or BODY_ADDR_LINE.match(cur):   # 인사·수신인 호칭
         return True
+    if len(prev.strip()) > BODY_JOIN_MAX and len(cur.strip()) > BODY_JOIN_MAX:
+        return True                                               # 둘 다 긴 줄이면 서로 다른 문장
     return False
 
 
@@ -1407,6 +1415,10 @@ def join_body_text(text: str) -> str:
             in_sig = False
             if out and out[-1] != "":
                 out.append("")                                     # 빈 줄은 한 번만
+            continue
+        if BODY_FENCE.match(line):                                # *** 울타리 안은 서명 블록
+            in_sig = not in_sig
+            out.append(line)
             continue
         prev = out[-1] if out else ""
         if prev and not hard and not in_sig and not _body_keeps_break(prev, cur=line):
