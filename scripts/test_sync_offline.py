@@ -86,11 +86,48 @@ class FakeNmail:
     """웹메일 서버 대신 정해진 응답을 돌려준다."""
 
     def __init__(self, inbox: list[dict], sent: list[dict], pages: dict[int, str],
-                 *, profile: str | None = PROFILE_HTML, header: str = HEADER_HTML):
+                 *, profile: str | None = PROFILE_HTML, header: str = HEADER_HTML,
+                 book: "FakeAddressBook | None" = None):
         self.inbox, self.sent, self.pages = inbox, sent, pages
         self.profile, self.header = profile, header
+        self.book = book
         self.reads: list[tuple[str, int]] = []
         self.seeded: list[tuple[str, int, int]] = []
+
+    # ── 사내 주소록 — 실제 Nmail.fetch_contacts 가 쓰는 메소드만 진짜 파서로 시원한다 ──
+    fetch_contacts = REAL_NMAIL.fetch_contacts      # 수집 루틴(그룹 순회·페이지 처리)은 실제 코드 그대로
+    def contact_group_tree(self):
+        if self.book is None:
+            raise sm.NmailError("주소록 화면이 로그인 페이지로 돌아갔습니다 (테스트: 주소록 없음)")
+        if self.book.fail:
+            raise sm.NmailError("주소록 그룹 트리를 읽지 못했습니다 (테스트: 실패 주입)")
+        self.book.tree_calls += 1
+        groups = sm.parse_contact_tree(self.book.tree_html)
+        if not groups:
+            raise sm.NmailError("주소록 그룹 트리를 읽지 못했습니다")
+        return groups
+
+    def contact_rows(self, path, param, no, *, kind, max_pages=20, pause=0.25):
+        assert self.book is not None
+        pages = (self.book.org_pages if kind == "org" else self.book.personal_pages).get(str(no))
+        if pages is None:
+            raise sm.NmailError(f"테스트: 없는 그룹 {param}={no}")
+        self.book.row_calls.append((kind, str(no)))
+        rows: list[dict] = []
+        total = 0
+        for page in range(1, max_pages + 1):
+            html = pages[page - 1] if page - 1 < len(pages) else ""
+            if not html:
+                break
+            if page == 1:
+                total = sm.contact_total(html)
+            batch = sm.parse_org_contacts(html) if kind == "org" else sm.parse_personal_contacts(html)
+            if not batch:
+                break
+            rows.extend(batch)
+            if not total or len(rows) >= total:
+                break
+        return rows
 
     def login(self):
         return None
@@ -138,6 +175,103 @@ class FakeNmail:
         return None
 
 
+# ─────────────────────────────────────────────── 가짜 사내 주소록 화면(실제 Nmail 마크업)
+#  주소록 그룹 트리 — 실제 address_group.php 의 JS(TreeNode)와 같은 모양. 조직도 뒤에 개인주소록이
+#  이어지면서 변수 이름(newNode, newNode_1 …)을 다시 쓰는 것까지 그대로 흉내낸다.
+TREE_HTML = """<script language="JavaScript" type="text/javascript">
+//<![CDATA[
+	objTreeMenu_1 = new TreeMenu("/addon/HTML_TreeMenu/img", "objTreeMenu_1", "_self", "treeMenuDefault", true, false);
+	 newNode = objTreeMenu_1.addItem(new TreeNode('조직도', 'folder_root.gif', null, true, true, 'treeMenuBold', '', 'folder_root.gif'));
+	 newNode.setEvent('onClick', 'parent.addr_list_update(\\'G\\', \\'0\\', \\'\\'); treeMenuClick(this, true);');
+	 newNode_1 = newNode.addItem(new TreeNode('자동차물류사업부', 'folder.gif', null, false, true, '', '', 'folder-expanded.gif'));
+	 newNode_1.setEvent('onClick', 'parent.addr_list_update(\\'G\\', \\'5\\', \\'\\'); treeMenuClick(this, false);');
+	 newNode_1_1 = newNode_1.addItem(new TreeNode('납입1팀', 'folder.gif', null, false, true, '', '', 'folder-expanded.gif'));
+	 newNode_1_1.setEvent('onClick', 'parent.addr_list_update(\\'G\\', \\'177\\', \\'\\'); treeMenuClick(this, false);');
+	 newNode_1_2 = newNode_1.addItem(new TreeNode('한화큐셀팀', 'folder.gif', null, false, true, '', '', 'folder-expanded.gif'));
+	 newNode_1_2.setEvent('onClick', 'parent.addr_list_update(\\'G\\', \\'23\\', \\'\\'); treeMenuClick(this, false);');
+	 newNode = objTreeMenu_1.addItem(new TreeNode('개인주소록', 'folder_root.gif', null, true, true, 'treeMenuBold', '', 'folder_root.gif'));
+	 newNode.setEvent('onClick', 'parent.addr_list_update(\\'P\\', \\'0\\', \\'\\'); treeMenuClick(this, true);');
+	 newNode_1 = newNode.addItem(new TreeNode('기본', 'folder.gif', null, false, true, '', '', 'folder-expanded.gif'));
+	 newNode_1.setEvent('onClick', 'parent.addr_list_update(\\'P\\', \\'337\\', \\'\\'); treeMenuClick(this, false);');
+	 newNode_2 = objTreeMenu_1.addItem(new TreeNode('공용주소록', 'folder_root.gif', null, true, true, 'treeMenuBold', '', 'folder_root.gif'));
+	 newNode_2.setEvent('onClick', 'parent.addr_list_update(\\'S\\', \\'0\\', \\'\\'); treeMenuClick(this, true);');
+//]]>
+</script>"""
+
+
+def org_row(n: int, name: str, email: str, title: str = "") -> str:
+    """member_list.php 의 실제 행 마크업."""
+    return f'''<tr id="tr{n}" class="main_table_body_Y{n % 2}" height="28">
+\t\t<td align="center" nowrap=""><input type="checkbox" name="chk_m_no[]" value="{n}" onclick="JavaScript:list_click(document.all.tr{n}, 'main_table_body_click_Y', 'main_table_body_Y{n % 2}');"></td>
+\t\t\t\t<td nowrap=""><a href="JavaScript:window_open('/member_info.php?m_no={n}', '', 750, 550);">{name}</a></td>
+\t\t\t\t<td nowrap="">{title}</td>
+\t\t\t\t<td nowrap=""><a href="/mail_write.php?mf_to=x" target="_parent">{email}</a></td>
+\t\t\t</tr>'''
+
+
+def personal_row(n: int, group: str, name: str, email: str) -> str:
+    """addr_list.php 의 실제 행 마크업(그룹·이름·이메일·휴대폰·회사/학교·수정)."""
+    return f'''<tr id="tr{n}" class="main_table_body_Y{n % 2}" height="28">
+\t\t<td align="center" nowrap=""><input type="checkbox" name="chk_ad_no[]" value="337|{n}" onclick="JavaScript:list_click(document.all.tr{n}, 'main_table_body_click_Y', 'main_table_body_Y{n % 2}');"></td>
+\t\t<td align="center" nowrap="">{group}</td>
+\t\t<td nowrap=""><a href="/addr_mod.php?s_adg_no=337&amp;is_iframe=1&amp;adg_no=337&amp;ad_no={n}">{name}</a></td>
+\t\t<td nowrap=""><a href="/mail_write.php?mf_to=x" target="_parent">{email}</a></td>
+\t\t<td nowrap=""></td>
+\t\t<td nowrap=""></td>
+\t\t<td align="center" nowrap=""><a class="btn btn-default btn-xs" href="/addr_mod.php?s_adg_no=337&amp;is_iframe=1&amp;adg_no=337&amp;ad_no={n}">수정</a></td>
+\t</tr>'''
+
+
+def contact_page(rows: list[str], total: int, *, page: int = 1, pages: int = 1, base: str = "member_list.php",
+                 param: str = "s_mg_no=177") -> str:
+    """목록 화면 한 페이지 — `※ 전체 N명` 과 페이저가 함께 있는 실제 구조."""
+    link = lambda p: (f'/../{base}?{param}&amp;is_iframe=1&amp;s_key2=ASC&amp;pageID={p}')
+    nums = "".join(f'<font color="#999999">|</font><a href="{link(p)}" class="nm_page_no">{p}</a>'
+                   for p in range(1, pages + 1) if p != page)
+    return f'''<html><body><form name="list" method="get">
+<table width="100%" cellspacing="0" cellpadding="0"><tbody><tr>
+\t<td>&nbsp;※ 전체 {total}명</td><td align="right"><input type="text" name="s_word"></td>
+</tr></tbody></table>
+<div class="nm_pager"><b><span class="nm_page_no_curr">{page}</span></b>{nums}</div>
+<table width="100%" cellspacing="0" cellpadding="3" class="table table-condensed">
+\t<thead><tr class="main_table_head2"><th>&nbsp;</th><th>이름</th><th>직위</th><th>이메일</th></tr></thead>
+\t<tbody>{''.join(rows)}</tbody></table>
+</body></html>'''
+
+
+NAPIP = [("강한", "kanghan@chunil.co.kr", ""), ("김기경", "sh624@chunil.co.kr", ""),
+         ("김성규", "kimtest@chunil.co.kr", ""), ("김세유", "seyou@chunil.co.kr", ""),
+         ("김수현 과장보", "ksh364@chunil.co.kr", ""), ("최수철", "csc7797@chunil.co.kr", "")]
+QCELL_NAMES = [(f"큐셀직원{i:02d}", f"qcell{i:02d}@chunil.co.kr", "") for i in range(1, 22)]  # 21명 → 2페이지
+
+
+class FakeAddressBook:
+    """주소록 응답 묶음 — fetch_contacts 가 몇 번 호출됐는지도 센다."""
+
+    def __init__(self, tree_html: str = TREE_HTML, *, fail: bool = False,
+                 org_pages: dict | None = None, personal_pages: dict | None = None):
+        self.tree_html = tree_html
+        self.fail = fail
+        self.tree_calls = 0
+        self.row_calls: list[tuple[str, str]] = []
+        if org_pages is None:
+            org_pages = {
+                "5": [contact_page([org_row(i + 1, *n) for i, n in enumerate(NAPIP[:2])], 2)],
+                "23": [contact_page([org_row(i + 1, *n) for i, n in enumerate(QCELL_NAMES[:20])], 21,
+                                    page=1, pages=2, param="s_mg_no=23"),
+                       contact_page([org_row(21, *QCELL_NAMES[20])], 21, page=2, pages=2, param="s_mg_no=23")],
+                "177": [contact_page([org_row(i + 1, *n) for i, n in enumerate(NAPIP)], len(NAPIP))],
+            }
+        self.org_pages = org_pages
+        if personal_pages is None:
+            personal_pages = {"337": [contact_page(
+                [personal_row(365, "기본", "Sungwoo Jung", "sungwoo.jung@gm.com"),
+                 personal_row(4611, "기본", "강지민", "jimin.kang@chunil.co.kr"),
+                 personal_row(4612, "기본", "최수철", "csc7797@chunil.co.kr")], 3,
+                base="addr_list.php", param="s_adg_no=337")]}
+        self.personal_pages = personal_pages
+
+
 class FakeGemini:
     def __init__(self, *a, **kw):
         self.calls = 0
@@ -171,7 +305,7 @@ def args_for(data_enc: str) -> argparse.Namespace:
                               thread_merge=True, track_replies=True, images=False, dump_dir=None,
                               chunil_id="kimtest", chunil_pw="x", ip_check="1",
                               gemini_key="fake-key", gemini_model="gemini-2.5-flash",
-                              seed_days=14, seed_max=30, board_config=None)
+                              seed_days=14, seed_max=30, board_config=None, refresh_contacts=False)
 
 
 def run(pin: str, keep: bool) -> int:
@@ -187,6 +321,8 @@ def run(pin: str, keep: bool) -> int:
             fails.append(name)
 
     # 설정(VIP 두 명) — 실제 배포에서는 board_config.json
+    #  (저장소 루트의 board_config.json 이 vips: [] 라 테스트 설정을 지우지 않도록 파일 읽기를 막는다)
+    sm.load_board_config = lambda *a, **kw: {}
     sm.configure({"name": ME_NAME, "title": ME_TITLE, "dept": ME_DEPT, "email": ME_ADDR},
                  {"vips": [VIP1, VIP2], "to_is_urgent": True})
 
@@ -225,7 +361,7 @@ def run(pin: str, keep: bool) -> int:
                             to=[f"{ME_NAME} <{ME_ADDR}>"], cc=[], subject="승인 검토 건",
                             body="<div>검토 부탁드립니다.</div>"),
     }
-    nm = FakeNmail(rows, [], pages)
+    nm = FakeNmail(rows, [], pages, book=FakeAddressBook())
     sm.Nmail = lambda *a, **kw: nm
     sm.Gemini = FakeGemini
     rep = sm.sync(args_for(work))
@@ -243,6 +379,10 @@ def run(pin: str, keep: bool) -> int:
     items = {it["id"]: it for it in data.get("items", [])}
     check("최근 N일 메일 6건 등록", len(items) == 6, f"{len(items)}건")
     check("seed_mailbox 사용(최근 14일·상한 30)", nm.seeded[:1] == [("inbox", 14, 30)], str(nm.seeded))
+    book_saved = data.get("contacts") or []
+    check("첫 실행에서 사내 주소록도 받아 저장",
+          bool(book_saved) and any(c.get("dept") == "납입1팀" for c in book_saved),
+          f"{len(book_saved)}명 예: {json.dumps((book_saved[:2] or [{}]), ensure_ascii=False)[:120]}")
 
     a = items.get(f"m-{base + 1}")
     check("VIP 1-1 → 🔴 최상위", bool(a) and a["priority"] == 1 and a.get("vipRank") == 1,
@@ -316,6 +456,108 @@ def run(pin: str, keep: bool) -> int:
     json.dump(empty, open(empty_path, "w", encoding="utf-8"))
     _, is_new = sm.load_or_init(empty_path, pin, seed_days=7)
     check("items 가 비면 최초 구축으로 판단", is_new is True)
+
+    # ── F. 사내 주소록 파서 ──────────────────────────────────────────────
+    print("\n[F] 사내 주소록(조직도·개인주소록) 파서")
+    groups = sm.parse_contact_tree(TREE_HTML)
+    triples = [(g["kind"], g["no"], g["name"], g["depth"]) for g in groups]
+    check("그룹 트리: 조직도·개인주소록 구분",
+          ("org", "0", "조직도", 0) in triples and ("personal", "337", "기본", 1) in triples,
+          str(triples))
+    check("그룹 깊이(부서 계층)와 변수 이름 재사용 처리",
+          ("org", "177", "납입1팀", 2) in triples and ("org", "5", "자동차물류사업부", 1) in triples,
+          str(triples))
+    check("`※ 전체 N명` 파싱", sm.contact_total(contact_page([], 392)) == 392,
+          str(sm.contact_total(contact_page([], 392))))
+    org_only = sm.parse_org_contacts(contact_page([org_row(i + 1, *n) for i, n in enumerate(NAPIP)], len(NAPIP)))
+    check("조직도 행 파싱(이름·이메일·직위 칸)",
+          len(org_only) == len(NAPIP) and org_only[5]["email"] == "csc7797@chunil.co.kr"
+          and org_only[4]["name"] == "김수현 과장보", json.dumps(org_only[:2] + org_only[-1:], ensure_ascii=False))
+    per_only = sm.parse_personal_contacts(contact_page(
+        [personal_row(365, "기본", "Sungwoo Jung", "sungwoo.jung@gm.com"),
+         personal_row(4611, "기본", "강지민", "jimin.kang@chunil.co.kr")], 2,
+        base="addr_list.php", param="s_adg_no=337"))
+    check("개인주소록 행 파싱(그룹·이름·메일)",
+          len(per_only) == 2 and per_only[0]["email"] == "sungwoo.jung@gm.com"
+          and per_only[0]["group"] == "기본", json.dumps(per_only, ensure_ascii=False))
+    dedup = sm.merge_contacts(
+        [{"name": "최수철", "email": "csc7797@chunil.co.kr", "dept": "납입1팀", "kind": "org", "title": ""}],
+        [{"name": "최수철", "email": "CSC7797@chunil.co.kr", "dept": "기본", "kind": "personal", "title": ""}])
+    check("같은 메일은 한 줄(조직도 우선)",
+          len(dedup) == 1 and dedup[0]["kind"] == "org" and dedup[0]["dept"] == "납입1팀",
+          json.dumps(dedup, ensure_ascii=False))
+
+    # ── G. owner 보완 — 사내 주소록 + @chunil.co.kr 우선 ────────────────
+    print("\n[G] owner 보완 (외부 복구 메일 → 사내 메일 · 부서/직급)")
+    hanmail_profile = """<html><body><form name="fmember"><table class="table">
+<tr><th>이름</th><td><input type="text" name="m_name" value="최수철"></td></tr>
+<tr><th>부서</th><td><input type="text" name="m_dept" value=""></td></tr>
+<tr><th>직급</th><td><select name="m_jikwi"><option selected></option></select></td></tr>
+<tr><th>메일</th><td>x@hanmail.net</td></tr>
+</table></form></body></html>"""
+    nm_outer = FakeNmail([], [], {}, profile=hanmail_profile)
+    have_book = [{"name": "최수철", "email": "csc7797@chunil.co.kr", "dept": "납입1팀",
+                  "kind": "org", "title": ""}]
+    ow_ext = sm.detect_owner(nm_outer, "csc7797", contacts=have_book)
+    check("외부 복구 메일 대신 사내 메일 저장",
+          ow_ext["email"] == "csc7797@chunil.co.kr", json.dumps(ow_ext, ensure_ascii=False))
+    check("주소록에서 부서·이름 보완",
+          ow_ext["dept"] == "납입1팀" and ow_ext["name"] == "최수철", json.dumps(ow_ext, ensure_ascii=False))
+    ow_name = sm.detect_owner(nm_outer, "csc7797", contacts=[
+        {"name": "최수철", "email": "choi.s@chunil.co.kr", "dept": "납입1팀", "kind": "org", "title": "부장"}])
+    check("주소록에 본인 메일이 없으면 이름으로 보완",
+          ow_name["dept"] == "납입1팀" and ow_name["email"] == "csc7797@chunil.co.kr",
+          json.dumps(ow_name, ensure_ascii=False))
+
+    # ── H. 주소록 수집 흐름 (비었을 때 · 있을 때 · --refresh-contacts · 실패) ──
+    print("\n[H] 주소록 수집 흐름")
+    book_path = os.path.join(tmp, "book.enc.json")
+    seed_area = sm.decrypt_payload(json.load(open(work, encoding="utf-8")), pin)
+    seed_area["contacts"] = []
+    json.dump(sm.encrypt_payload(seed_area, pin), open(book_path, "w", encoding="utf-8"))
+    ab1 = FakeAddressBook()
+    sm.Nmail = lambda *a, **kw: FakeNmail([], [], {}, book=ab1)
+    rep_h1 = sm.sync(args_for(book_path))
+    saved = sm.decrypt_payload(json.load(open(book_path, encoding="utf-8")), pin).get("contacts") or []
+    check("주소록이 비어 있으면 자동 수집", ab1.tree_calls == 1 and len(saved) > 0, f"{len(saved)}명")
+    check("메일 신규가 없어도 주소록 때문에 저장(changed)", rep_h1.get("changed") is True, str(rep_h1.get("changed")))
+    check("21명 그룹은 2페이지까지 읽음", ("org", "23") in ab1.row_calls and
+          sum(1 for c in saved if c.get("dept") == "한화큐셀팀") == 21,
+          f"row_calls={ab1.row_calls} 큐셀={sum(1 for c in saved if c.get('dept') == '한화큐셀팀')}")
+    check("조직도에 이미 있는 메일은 개인주소록에서 제외",
+          sum(1 for c in saved if c.get("email") == "csc7797@chunil.co.kr") == 1,
+          str([c for c in saved if c.get("email") == "csc7797@chunil.co.kr"]))
+    ab2 = FakeAddressBook()
+    sm.Nmail = lambda *a, **kw: FakeNmail([], [], {}, book=ab2)
+    rep_h2 = sm.sync(args_for(book_path))
+    check("주소록이 있으면 다시 받지 않음", ab2.tree_calls == 0 and rep_h2.get("changed") is False,
+          f"tree_calls={ab2.tree_calls} changed={rep_h2.get('changed')}")
+    ab3 = FakeAddressBook()
+    sm.Nmail = lambda *a, **kw: FakeNmail([], [], {}, book=ab3)
+    args3 = args_for(book_path)
+    args3.refresh_contacts = True
+    rep_h3 = sm.sync(args3)
+    check("--refresh-contacts 면 새로 받음",
+          ab3.tree_calls == 1 and rep_h3.get("changed") is True,
+          f"tree_calls={ab3.tree_calls} changed={rep_h3.get('changed')}")
+    # 수집 실패해도 메일 동기화는 계속된다
+    n9 = base + 9
+    pages[n9] = read_page(date="2026-11-23 12:10", frm=f'"{ME_NAME}" <{ME_ADDR}>',
+                          to=[f"{ME_NAME} <{ME_ADDR}>"], cc=[], subject="주소록 실패 처리 확인",
+                          body="<div>확인 부탁드립니다.</div>")
+    seed_area["contacts"] = []
+    json.dump(sm.encrypt_payload(seed_area, pin), open(book_path, "w", encoding="utf-8"))
+    sm.Nmail = lambda *a, **kw: FakeNmail(
+        [row(n9, "주소록 실패 처리 확인", f'"{ME_NAME}" <{ME_ADDR}>', "2026-11-23 12:10")],
+        [], pages, book=FakeAddressBook(fail=True))
+    rep_h4 = sm.sync(args_for(book_path))
+    after = sm.decrypt_payload(json.load(open(book_path, encoding="utf-8")), pin)
+    check("주소록 실패는 경고로만 남김",
+          any("사내 주소록 수집 실패" in w for w in rep_h4.get("warnings") or []),
+          str(rep_h4.get("warnings"))[:160])
+    check("실패해도 메일은 정상 동기화",
+          any(it["id"] == f"m-{n9}" for it in after.get("items") or []) and after.get("contacts") == [],
+          f"items={len(after.get('items') or [])}")
 
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:

@@ -44,9 +44,21 @@
 
 ## 내 이름·부서는 자동으로
 
-로그인 사용자의 이름·메일·부서는 `sync_mail.py` 가 웹메일 화면(개인정보 페이지 → 상단 프로필)에서
-읽어 `data.owner` 에 넣습니다. 화면 상단(`○○○ 님 ▾`), 답장 서명, 본문 지목 판정이 모두 이 값을 씁니다.
-**코드에 사람 이름을 고칠 필요가 없습니다.**
+로그인 사용자의 이름·메일·부서·직급은 `sync_mail.py` 가 웹메일 화면(개인정보 페이지 → 상단 프로필 →
+**사내 주소록의 본인 항목**)에서 읽어 `data.owner` 에 넣습니다. 화면 상단(`○○○ 님 ▾`), 답장 서명,
+본문 지목 판정이 모두 이 값을 씁니다. **코드에 사람 이름을 고칠 필요가 없습니다.**
+
+`data.owner` 의 메일은 언제나 **사내 메일(`아이디@chunil.co.kr`)** 입니다. 개인정보 페이지에 적힌
+외부 복구 메일(hanmail·naver 등)은 쓰지 않습니다 — To 판정이 그 주소로 이뤄지기 때문입니다.
+
+## 사내 주소록은 자동으로
+
+`sync_mail.py` 는 웹메일의 **조직도 + 개인주소록**을 읽어 `data.contacts` 로 함께 암호화해 넣습니다
+(이름·메일·부서·구분). 메일 발신자의 이름·부서 표기와 대시보드 **⚙️ 분류 규칙 설정** 목록이 이 값을 씁니다.
+
+- 수집 시점: `data.contacts` 가 비어 있을 때(첫 실행), 또는 `--refresh-contacts` 를 줬을 때
+- 수집에 실패해도 메일 동기화는 그대로 진행하고 경고만 남깁니다.
+- 직접 확인: `python3 scripts/sync_mail.py --contacts-probe` (몇 명 읽혔는지 출력)
 
 ## 분류 기준 바꾸기
 
@@ -80,7 +92,7 @@
 | `data.enc.json` | 암호문. 첫 실행 때 자동 생성 → 이후 Actions 가 갱신 |
 | `assets/left-banner.jpg` | 좌측 여백 배너 이미지 |
 | `board_config.json` | 분류 기준(위 설명) |
-| `scripts/sync_mail.py` | 웹메일 로그인 → 사용자 인식 → 새 메일 수집 → Gemini 분석 → 재암호화 |
+| `scripts/sync_mail.py` | 웹메일 로그인 → 사내 주소록·사용자 인식 → 새 메일 수집 → Gemini 분석 → 재암호화 |
 | `scripts/backfill_archive.py` | (선택) 과거 메일 본문을 조금씩 채우기 — 실행 건수를 넣었을 때만 |
 | `scripts/test_sync_offline.py` | 네트워크 없이 파이프라인 전체를 검사하는 테스트 |
 | `.github/workflows/mail-sync.yml` | (3단계에서 직접 만드는 파일) 30분 스케줄 · 수동 실행 · main/gh-pages 커밋·배포. 원본은 `scripts/mail-sync.yml.example` |
