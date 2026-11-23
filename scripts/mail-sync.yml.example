@@ -4,7 +4,7 @@ name: mail-board sync
 # Actions 탭에서 [Run workflow] 로 직접 한 번 실행할 수 있고, 그때는 과거 메일 채우기(백필) 건수도 고를 수 있습니다.
 on:
   schedule:
-    - cron: "23,53 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -39,6 +39,22 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+
+      - name: Pull latest UI/scripts from template
+        id: tpl
+        continue-on-error: true
+        run: |
+          BASE="https://raw.githubusercontent.com/seongkuy0427-blip/mail-board-template/main"
+          CHANGED=false
+          for f in index.html scripts/sync_mail.py; do
+            if curl -fsSL "$BASE/$f" -o "/tmp/tpl_$(basename $f)" && [ -s "/tmp/tpl_$(basename $f)" ]; then
+              if ! cmp -s "/tmp/tpl_$(basename $f)" "$f"; then
+                cp "/tmp/tpl_$(basename $f)" "$f"
+                CHANGED=true
+              fi
+            fi
+          done
+          echo "tpl_changed=$CHANGED" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
@@ -78,13 +94,13 @@ jobs:
           python scripts/backfill_archive.py $ARGS
 
       - name: Commit main
-        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true'
+        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true' || steps.tpl.outputs.tpl_changed == 'true'
         run: |
           set -uo pipefail
           MSG="Auto-update mail board ($(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M') · 신규 ${{ steps.sync.outputs.new_count || '0' }}건 · 백필 ${{ steps.backfill.outputs.bf_filled || '0' }}건)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data.enc.json
+          git add data.enc.json index.html scripts/sync_mail.py
           git commit -m "$MSG" || { echo "커밋할 변경 없음"; exit 0; }
           for i in 1 2 3; do
             if git push origin HEAD:main; then exit 0; fi
@@ -108,7 +124,7 @@ jobs:
             -f "source[branch]=gh-pages" -f "source[path]=/" >/dev/null 2>&1 || true
 
       - name: Deploy gh-pages
-        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true'
+        if: steps.sync.outputs.changed == 'true' || steps.backfill.outputs.bf_changed == 'true' || steps.tpl.outputs.tpl_changed == 'true'
         run: |
           set -uo pipefail
           MSG="Auto-update mail board ($(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M'))"
