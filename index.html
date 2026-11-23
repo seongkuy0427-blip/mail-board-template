@@ -4202,13 +4202,15 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     "업무 노고 노고가 많으십니다 수고 수고가 열람 참조 하기 제출 대상 포함 일괄 전사 단순 조치 필요 없음 내역 목록 발신 수신 제목 요약 기한 마감 대기 진행중 " +
     "부장 과장 차장 대리 사원 상무 팀장 담당 대표 주임 계장 반장 직장 " +
     "부장이 과장이 차장이 대리가 사원이 상무가 팀장이 전달한 정리해 함께 요구 유지 없고 있고 있다 없다 한다 된다 보낸 받은 이어 따라 " +
+    "한국지엠 지엠 gm 부평공장 창원공장 보령공장 협력업체 계약업체 회의록 소식지 게시판 게시 링크 배포 담당자 관리 적용 사용 통일 선택 자유 공통 관련자 참석자 협의체 " +
+    "이슈 남은 사례 유사 동일 반복 후속 통보 작성 종료 이후 차이 먼저 확인됨 발송됨 수신됨 차주 금주 전주 담당자에게 제목의 요구는 자료와 " +
     "경영지원팀 납입관리부 해외물류부 물류사업부 인재경영시스템 천일인 사업부 전직원 직원").split(/\s+/));
   /* 사용자 업무에서 반복해 나오는 핵심 도메인 키워드 — 겸치면 가중치를 더 준다 */
   const CASE_DOMAIN = new Set(("ptr eop ptu ims my27 my26 t26 t25 llp pfep sot gmk rebc bpn asn bl po qb byc bqb gate dock 상하역 " +
     "재고실사 공정반송 용기 정례회의 급여 미상차 출하리스트 납입요청 설변 반출증 불량자재 부족자재 구사양 신사양 모듈 airbag handle asm " +
     "납입 출하 재고 반송 품번 선적 입항 통관 컨테이너 서열장 서열 보급 도입자재 일일보고 근태 안전점검 실물재고 보급지시 처리방안").split(/\s+/));
   const CASE_PART = "을를이가은는의에과와도만로";
-  const CASE_MAX_DF = 1200;   /* 전체의 13%를 넘는 흔한 토큰은 후보에서 제외 */
+  const CASE_MAX_DF = 250;    /* 전체의 2.7%를 넘는 흔한 토큰은 불용어 등록 없이도 자동 제외 */
   const CASE_MAX = 6;         /* 상위 최대 6건 */
   let CASE_IX = null, CASE_SRC = null, CASE_STAMP = "";
   let CASE_BUILDING = false, CASE_BUILD_TOKEN = 0;
@@ -4222,6 +4224,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return true;
     }
     if (s.length === 6) {
+      const y2 = +s.slice(0, 2), m2 = +s.slice(2, 4), d2 = +s.slice(4, 6);
+      if (y2 >= 20 && y2 <= 30 && m2 >= 1 && m2 <= 12 && d2 >= 1 && d2 <= 31) return true;
       const h = +s.slice(0, 2), mi = +s.slice(2, 4);
       if (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) return true;
     }
@@ -4254,6 +4258,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       if (st > 0 && CASE_ALNUM.test(text.charAt(st - 1))) continue;
       if (en < text.length && CASE_NOALNUM.test(text.charAt(en)) === false) continue;
       const key = m[0].toUpperCase();
+      if (/^MY\d{2}$/.test(key)) continue;
       if (key.length >= 4) out.add(key);
     }
     return out;
@@ -4394,9 +4399,10 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       const e = ev.get(j) || { c: [], k: [], kw: 0, n: 0 };
       const nc = e.c.length, nk = e.n;
       const dom = e.k.some((w) => CASE_DOMAIN.has(w));
-      const titBoth = e.k.some((w) => ix.tit[i0].has(w) && ix.tit[j].has(w) && (CASE_DOMAIN.has(w) || (ix.df.get(w) || 0) <= 300));
-      const strongTitle = titBoth || e.k.some((w) => ix.tit[i0].has(w) && CASE_DOMAIN.has(w));
-      if (!nc && !(strongTitle || (dom && nk >= 2))) return;
+      const titHits = e.k.filter((w) => ix.tit[i0].has(w) && ix.tit[j].has(w));
+      const rareTit = titHits.some((w) => (ix.df.get(w) || 999) <= 35);
+      const strongTitle = titHits.length >= 2 || rareTit;
+      if (!nc && !strongTitle) return;
       let sc = sc0;
       const other = items()[j];
       if (!other || other.id !== ix.ids[j]) return;
