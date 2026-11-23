@@ -17,12 +17,16 @@
 ## 쓰는 법 (요약)
 
 1. 이 저장소에서 **Use this template → Create a new repository** → 이름 `mail-board` → **Create**.
+   (버튼이 안 보이면 **Import** 로도 됩니다: `github.com/new/import` → 위 저장소 주소 붙여넣기 → 이름 `mail-board` → Public)
 2. **Settings → Secrets and variables → Actions** 에 4개 등록:
    `CHUNIL_ID`(웹메일 아이디, `@` 앞부분) · `CHUNIL_PW` · `GEMINI_API_KEY` · `MAILBOARD_PIN`(내 대시보드 비밀번호).
-3. **Settings → Pages** → Source: `Deploy from a branch` → Branch **`gh-pages`** / `/ (root)` → Save.
-   (처음에는 `gh-pages` 가 없으므로 4번 실행 후에 다시 오면 됩니다.)
-4. **Actions → mail-board sync → Run workflow** 한 번 실행 (첫 실행은 1~3분).
-5. `https://<내깃허브아이디>.github.io/mail-board/` 접속 → 아이디와 `MAILBOARD_PIN` 입력.
+3. **자동 실행 파일 만들기** — 저장소 **Add file → Create new file** → 이름에 `.github/workflows/mail-sync.yml` →
+   [`scripts/mail-sync.yml.example`](scripts/mail-sync.yml.example) 내용을 복사해 붙여넣고 **Commit changes**.
+   (아직 저장소에 없습니다 — GitHub 앱 권한 문제로 템플릿에 함께 넣지 못했습니다.)
+4. **Settings → Pages** → Source: `Deploy from a branch` → Branch **`gh-pages`** / `/ (root)` → Save.
+   (처음에는 `gh-pages` 가 없으므로 5번 실행 후에 다시 오면 됩니다.)
+5. **Actions → mail-board sync → Run workflow** 한 번 실행 (첫 실행은 1~3분).
+6. `https://<내깃허브아이디>.github.io/mail-board/` 접속 → 아이디와 `MAILBOARD_PIN` 입력.
 
 자세한 절차·문제 해결은 **[`scripts/SETUP-actions.md`](scripts/SETUP-actions.md)** 를 보세요.
 
@@ -79,7 +83,7 @@
 | `scripts/sync_mail.py` | 웹메일 로그인 → 사용자 인식 → 새 메일 수집 → Gemini 분석 → 재암호화 |
 | `scripts/backfill_archive.py` | (선택) 과거 메일 본문을 조금씩 채우기 — 실행 건수를 넣었을 때만 |
 | `scripts/test_sync_offline.py` | 네트워크 없이 파이프라인 전체를 검사하는 테스트 |
-| `.github/workflows/mail-sync.yml` | 30분 스케줄 · 수동 실행 · main/gh-pages 커밋·배포 |
+| `.github/workflows/mail-sync.yml` | (3단계에서 직접 만드는 파일) 30분 스케줄 · 수동 실행 · main/gh-pages 커밋·배포. 원본은 `scripts/mail-sync.yml.example` |
 
 ## 안전하게 쓰기
 

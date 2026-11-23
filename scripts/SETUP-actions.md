@@ -27,11 +27,15 @@ GitHub → 내 저장소 → **Settings → Secrets and variables → Actions �
 
 선택 사항(**Settings → Variables**): `GEMINI_MODEL`(기본 `gemini-2.5-flash`), `NMAIL_IP_CHECK`(기본 `1`).
 
-## 2. 워크플로우 파일 확인
+## 2. 워크플로우 파일 만들기 (필수)
 
-`.github/workflows/mail-sync.yml` 이 저장소에 있으면 스케줄(30분 간격)이 등록됩니다.
-템플릿으로 만들면 자동으로 들어 있습니다. 파일이 없다면 저장소 → **Add file → Create new file** →
-이름에 `.github/workflows/mail-sync.yml` 을 쓰고 `scripts/mail-sync.yml.example` 내용을 붙여넣어 커밋하세요.
+자동 실행(30분 간격)은 `.github/workflows/mail-sync.yml` 파일이 있어야 등록됩니다.
+이 템플릿에는 그 파일이 빠져 있으므로 한 번 직접 만들어야 합니다(GitHub 앱 권한 문제로 함께 올리지 못했습니다).
+
+1. 저장소 위쪽 **Add file → Create new file**
+2. 파일 이름 칸에 `.github/workflows/mail-sync.yml` 을 그대로 입력
+3. 새 탭에서 `scripts/mail-sync.yml.example` 을 열고 오른쪽 위 **Copy raw file** 로 내용을 복사 → 붙여넣기
+4. 아래 **Commit changes**
 
 ## 3. GitHub Pages 켜기
 
