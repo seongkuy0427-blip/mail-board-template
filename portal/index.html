@@ -286,6 +286,11 @@
   /* ---------- 캘린더 ---------- */
   /* ---------- 🌤️ 날씨 (헤더 우측 칩 + 드롭다운) ---------- */
   .hd-sub{display:flex; justify-content:flex-end; position:relative; padding:0 16px 8px; background:transparent}
+  /* 🏷️ 화면 버전 배지 (v1.2.6) — 헤더 아래 줄 왼쪽, PC·모바일 공통 */
+  .ver-badge{display:inline-flex; align-items:center; gap:4px; margin-right:auto; padding:2px 7px; border-radius:999px;
+    border:1px solid var(--line); background:#f4f4f5; color:var(--ink-3); font-size:9.8px; font-weight:600;
+    letter-spacing:.3px; font-variant-numeric:tabular-nums; align-self:center; white-space:nowrap; cursor:help}
+  .ver-badge:hover{background:#ececee; color:var(--ink-2)}
   .wx-chip{display:inline-flex; align-items:center; gap:5px; padding:4px 10px 4px 9px; border-radius:7px;
     border:1px solid var(--line); background:#fff; cursor:pointer; font-family:inherit; font-size:11.5px; color:var(--ink-2);
     white-space:nowrap; transition:border-color .12s, background .12s}
@@ -589,6 +594,7 @@
   .cus-form .cf-chips button{background:#f4f4f5; border-color:#e4e4e7; font-weight:500; padding:3px 8px}
   .cus-form .cf-chips button:hover{background:#ebebee}
   .cus-form .cf-chips button.on{background:var(--brand-weak); border-color:var(--brand); color:var(--brand)}
+  .cus-form .cf-hint{flex:1 1 100%; font-size:10px; color:var(--ink-3); line-height:1.45; margin-top:1px}
   .day .ev.cus{background:var(--orange-weak); color:#8a5320}
   .row.cus{border-left-color:var(--orange)}
   .row .rank.cus{background:var(--orange-weak); color:#8a5320; border-color:#eddcc2; min-width:26px}
@@ -1360,6 +1366,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.6</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1568,7 +1575,16 @@
 (() => {
   "use strict";
 
-  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1" };
+  /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
+     GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.6").replace(/^v/i, "");
+  (function paintVer() {
+    const b = document.getElementById("verBadge");
+    if (!b) return;
+    b.textContent = "v" + APP_VER;
+    b.title = "현재 화면 버전 v" + APP_VER + (window.__PORTAL_MODE__ ? " · 사내 포털 서버" : " · GitHub Pages");
+  })();
+  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", calMeta: "mb_cal_meta_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1" };
 
   /* ================= 포털 모드 (팀 공용 통합 서버) =================
      server.py 가 내려줄 때 window.__PORTAL_MODE__ = true 가 먼저 실행된다.
@@ -2711,19 +2727,89 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   /* ---------------- 렌더: 내 캘린더 (사용자가 직접 등록) ----------------
      기존의 ‘dueDate 가 있으면 자동으로 채우기’를 없앴다. 캘린더는 오직 행·드로어의
      📅 캘린더 버튼으로 직접 등록한 메일만 보여준다 (localStorage mb_cal_items_v1). */
-  function shortTitle(it) { const t = (it.title || "").replace(/\s*\(.*?\)\s*/g, " ").trim(); return t.length > 12 ? t.slice(0, 12) + "\u2026" : t; }
+  function shortTitle(it) { const t = String(calTitle(it) || "").replace(/\s*\(.*?\)\s*/g, " ").trim(); return t.length > 12 ? t.slice(0, 12) + "\u2026" : t; }
+  /* ---------------- 📅 등록한 메일의 캘린더 표시 제목·메모 ----------------
+     원본 메일 제목은 건드리지 않고, 캘린더에 보이는 이름표만 따로 저장한다
+     (localStorage mb_cal_meta_v1 = { [메일 id]: {title, memo, updatedAt} }).
+     제목을 비우면 원래 메일 제목을 쓴다 — 달력 셀 배지·오른쪽 카드·목록에 모두 반영되고,
+     ☁️ 동기화(포털은 /api/state)의 calmeta 구역으로 PC·휴대폰이 같은 이름표를 본다. */
+  let CAL_META = null, CAL_EDIT = null, CAL_EDIT_DRAFT = null;
+  function calMetaLoad() {
+    if (CAL_META) return CAL_META;
+    CAL_META = {};
+    try {
+      const raw = JSON.parse(LSK.getItem(LS.calMeta) || "{}");
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) CAL_META = raw;
+    } catch (e) { CAL_META = {}; }
+    return CAL_META;
+  }
+  function calMetaSave() { try { LSK.setItem(LS.calMeta, JSON.stringify(calMetaLoad())); } catch (e) {} mbSyncMark("calmeta"); }
+  function calMetaOf(id) { const m = id ? calMetaLoad()[id] : null; return (m && typeof m === "object") ? m : null; }
+  /* 캘린더에 보일 제목 — 직접 고친 이름표가 있으면 그것, 없으면 원래 메일 제목 */
+  function calTitle(it) {
+    const m = calMetaOf(it && it.id), t = m ? String(m.title || "").trim() : "";
+    return t || ((it && it.title) || "");
+  }
+  function calMemo(it) { const m = calMetaOf(it && it.id); return m ? String(m.memo || "").trim() : ""; }
+  function calMetaSet(id, title, memo) {
+    const it = byId(id); if (!it) return false;
+    const t = String(title || "").trim().slice(0, 80), mm = String(memo || "").trim().slice(0, 120);
+    const m = calMetaLoad();
+    if (!t && !mm) delete m[id];
+    else m[id] = { title: t, memo: mm, updatedAt: new Date().toISOString() };
+    calMetaSave();     /* localStorage + ☁️ 클라우드 동기화(포털은 /api/state) */
+    CAL_EDIT = null; CAL_EDIT_DRAFT = null;
+    renderCalendar(); renderKpi(); renderList();
+    if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
+    toast((t || mm ? "✏️ 캘린더 표시를 바꿨습니다 — " : "✏️ 표시를 지워 원래 제목으로 돌렸습니다 — ") + calTitle(it).slice(0, 24));
+    return true;
+  }
+  function calEditOpen(id) {
+    const it = byId(id); if (!it) return;
+    CAL_EDIT = it.id; CAL_EDIT_DRAFT = null;
+    CAL_MOVE = null; CAL_MOVE_DRAFT = "";
+    cusFormReset();
+    renderCalSide();
+    const el = document.querySelector("form[data-cal-meta-form] .cf-title");
+    if (el) { try { el.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function calEditClose() {
+    CAL_EDIT = null; CAL_EDIT_DRAFT = null;
+    renderCalSide();
+  }
+
   /* 오른쪽 상세 패널 — 선택한 날짜(없으면 오늘)의 메일 일정 + 직접 일정 */
   /* 📅 등록한 메일 카드의 옮기기 인라인 폼 상태 — 60초 자동 갱신에도 입력값을 잃지 않게 */
   let CAL_MOVE = null, CAL_MOVE_DRAFT = "";
+  /* 📅 등록한 메일 카드 — 📌 개인/구두 일정 카드와 같은 모양:
+     위(제목) · 가운데(발신자·날짜·메모) · 아래 버튼 줄 [✏️ 수정] [📅 옮기기] [✕ 삭제] → 인라인 폼 */
+  function calActsHtml(it) {
+    const id = esc(it.id);
+    return '<div class="cus-acts">' +
+      '<button type="button" class="ca' + (CAL_EDIT === it.id ? " on" : "") + '" data-cal-edit="' + id + '" title="캘린더에 보이는 제목·메모를 고칩니다 (원본 메일 제목은 그대로)">✏️ 수정</button>' +
+      '<button type="button" class="ca' + (CAL_MOVE === it.id ? " on" : "") + '" data-cal-move="' + id + '" title="제목은 그대로 두고 등록 날짜만 다른 날로 옮깁니다">📅 옮기기</button>' +
+      '<button type="button" class="ca del" data-cal-tog="' + id + '" title="캘린더에서 빼기 (삭제) — 원본 메일은 그대로 남습니다" aria-label="캘린더에서 빼기">✕ 삭제</button></div>';
+  }
+  function calEditFormHtml(it) {
+    const meta = calMetaOf(it.id) || {};
+    const d = (CAL_EDIT === it.id && CAL_EDIT_DRAFT) ? CAL_EDIT_DRAFT : { title: String(meta.title || ""), memo: String(meta.memo || "") };
+    const orig = String(it.title || "");
+    return '<form class="cus-form" data-cal-meta-form="' + esc(it.id) + '" autocomplete="off">' +
+      '<span class="cf-lab">✏️ 수정</span>' +
+      '<input type="text" class="cf-title" value="' + esc(d.title) + '" maxlength="80" placeholder="' + esc(orig) + '" aria-label="캘린더에 보일 제목 (비우면 원래 메일 제목)">' +
+      '<input type="text" class="cf-memo" value="' + esc(d.memo) + '" maxlength="120" placeholder="메모 (선택)" aria-label="메모">' +
+      '<span class="cf-act"><button type="submit" class="primary">저장</button><button type="button" data-cal-meta-cancel="1">취소</button></span>' +
+      '<div class="cf-hint">비우면 원래 메일 제목 ‘' + esc(orig.length > 26 ? orig.slice(0, 26) + "\u2026" : orig) + '’을 씁니다 · 메일 원본은 바뀌지 않습니다</div></form>';
+  }
   function sideCardMail(it) {
-    const moving = CAL_MOVE === it.id;
-    return '<div class="side-card mail' + (moving ? " open" : "") + '" data-open="' + esc(it.id) + '" role="button" tabindex="0" title="누르면 메일 상세 열기">' +
-      '<div class="sc-top"><span class="sc-t">' + esc(it.title) + '</span>' +
-      '<button type="button" class="sc-mv' + (moving ? " on" : "") + '" data-cal-move="' + esc(it.id) + '" title="제목은 그대로 두고 등록 날짜만 다른 날로 옮깁니다">📅 옮기기</button>' +
-      '<button type="button" class="sc-x" data-cal-tog="' + esc(it.id) + '" title="캘린더에서 빼기" aria-label="캘린더에서 빼기">✕</button></div>' +
-      '<div class="sc-m">' + esc(it.sender) + " · " + esc((it.receivedAt || "").slice(0, 10)) +
-        (calDate(it) ? " · 📅 " + esc(calDate(it)) : "") + '</div>' +
-      (moving ? calMoveFormHtml(it) : "") + '</div>';
+    const editing = CAL_EDIT === it.id, moving = CAL_MOVE === it.id;
+    const reg = calDate(it), memo = calMemo(it);
+    return '<div class="side-card mail' + (editing || moving ? " open" : "") + '" data-open="' + esc(it.id) + '" role="button" tabindex="0" title="누르면 메일 상세 열기">' +
+      '<div class="sc-top"><span class="badge b-cal on">📅 ' + esc(reg ? String(reg).slice(5).replace("-", "/") : "등록") + '</span><span class="sc-t">' + esc(calTitle(it)) + '</span></div>' +
+      '<div class="sc-m">' + esc(it.sender) + " · " + esc((it.receivedAt || "").slice(0, 10)) + '</div>' +
+      (memo ? '<div class="sc-m">' + esc(memo) + '</div>' : "") +
+      (editing || moving ? "" : '<div class="sc-m">🔗 메일 원문 보기</div>') +
+      calActsHtml(it) + (editing ? calEditFormHtml(it) : "") + (moving ? calMoveFormHtml(it) : "") + '</div>';
   }
   function calMoveFormHtml(it) {
     const cur = calDate(it) || calDefaultDate(it);
@@ -2752,6 +2838,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const mails = calItems().filter((x) => calDate(x) === date);
     /* 옮기기 폼은 그 카드가 보이는 동안만 — 다른 날짜로 넘어가면 조용히 닫는다 */
     if (CAL_MOVE && !mails.some((m) => m.id === CAL_MOVE)) { CAL_MOVE = null; CAL_MOVE_DRAFT = ""; }
+    if (CAL_EDIT && !mails.some((m) => m.id === CAL_EDIT)) { CAL_EDIT = null; CAL_EDIT_DRAFT = null; }
     const cus = cusFor(date);
     $("calSideTitle").textContent = date + (dd ? " (" + DOW[dd.getDay()] + ")" : "");
     $("calSideN").textContent = (mails.length + cus.length) + "건";
@@ -2819,6 +2906,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const m = calLoad();
     if (m[id]) {
       delete m[id]; calSave();
+      if (CAL_EDIT === id) { CAL_EDIT = null; CAL_EDIT_DRAFT = null; }
+      if (CAL_MOVE === id) { CAL_MOVE = null; CAL_MOVE_DRAFT = ""; }
       toast("캘린더에서 뺐습니다 — " + shortTitle(it));
     } else {
       m[id] = date || calDefaultDate(it); calSave();
@@ -3049,6 +3138,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (!c) return;
     CUS_EDIT = c.id; CUS_DRAFT = { date: c.date, title: c.title, memo: c.memo || "" };
     CUS_MOVE = null; CUS_MOVE_DRAFT = "";
+    CAL_EDIT = null; CAL_EDIT_DRAFT = null;
     renderCalSide(); renderList();
     cusFormFocus(".cf-title");
   }
@@ -3056,6 +3146,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (!c) return;
     CUS_MOVE = c.id; CUS_MOVE_DRAFT = c.date;
     CUS_EDIT = null; CUS_DRAFT = null;
+    CAL_EDIT = null; CAL_EDIT_DRAFT = null;
     renderCalSide(); renderList();
     cusFormFocus(".cf-date");
   }
@@ -3406,7 +3497,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       '<span class="rmain"><span class="rt">' +
         (pin ? '<span class="pinmark" title="📌 고정됨 — ‘📌 고정’ 탭에 모여 있습니다(고정을 풀면 원래 탭으로 돌아갑니다)">📌</span>' : "") +
         (isNewMail(it) ? '<span class="newpill" title="새로 들어온 메일 — 열어보거나 ✅ 확인하면 사라집니다">NEW</span>' : "") +
-        '<span class="rtitle">' + esc(it.title) + "</span>" +
+        '<span class="rtitle">' + esc(calTitle(it)) + "</span>" +
         (thr > 1 ? '<span class="thr">+' + (thr - 1) + "</span>" : "") + "</span>" +
         '<span class="rmeta"><b>' + esc(it.sender) + "</b> · " + esc(it.receivedAt) +
         (ruleForItem(it) ? ' · <span class="rm-mark" title="⚙️ 내 분류 규칙이 이 메일에 적용되어 있습니다">⚙️ 내 규칙</span>' : "") +
@@ -5235,6 +5326,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   /* ✏️ 수정 · 📅 옮기기 폼 — 어느 위치(카드·배너)에서든 같은 방식으로 처리 */
   document.addEventListener("submit", (e) => {
+    const mf = e.target && e.target.closest ? e.target.closest("form[data-cal-meta-form]") : null;
+    if (mf) {
+      e.preventDefault();
+      calMetaSet(mf.getAttribute("data-cal-meta-form"), mf.querySelector(".cf-title").value, mf.querySelector(".cf-memo").value);
+      return;
+    }
     const cf = e.target && e.target.closest ? e.target.closest("form[data-cal-move-form]") : null;
     if (cf) {
       e.preventDefault();
@@ -5252,6 +5349,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   document.addEventListener("input", (e) => {
     const cf = e.target && e.target.closest ? e.target.closest("form[data-cal-move-form]") : null;
     if (cf && CAL_MOVE) { const d = cf.querySelector(".cf-date"); CAL_MOVE_DRAFT = d ? d.value : ""; return; }
+    const mfi = e.target && e.target.closest ? e.target.closest("form[data-cal-meta-form]") : null;
+    if (mfi && CAL_EDIT) {
+      const ti = mfi.querySelector(".cf-title"), me = mfi.querySelector(".cf-memo");
+      CAL_EDIT_DRAFT = { title: ti ? ti.value : "", memo: me ? me.value : "" };
+      return;
+    }
     const f = e.target && e.target.closest ? e.target.closest("form[data-cus-form]") : null;
     if (!f) return;
     const date = f.querySelector(".cf-date"), title = f.querySelector(".cf-title"), memo = f.querySelector(".cf-memo");
@@ -5259,10 +5362,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     else if (CUS_EDIT === f.getAttribute("data-cus-id")) CUS_DRAFT = { date: date ? date.value : "", title: title ? title.value : "", memo: memo ? memo.value : "" };
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || (!CUS_EDIT && !CUS_MOVE && !CAL_MOVE)) return;
+    if (e.key !== "Escape" || (!CUS_EDIT && !CUS_MOVE && !CAL_MOVE && !CAL_EDIT)) return;
     const t = e.target;
     if (t && t.closest && t.closest("form[data-cus-form]")) { e.stopPropagation(); cusFormClose(); return; }
+    if (t && t.closest && t.closest("form[data-cal-meta-form]")) { e.stopPropagation(); calEditClose(); return; }
     if (t && t.closest && t.closest("form[data-cal-move-form]")) { e.stopPropagation(); calMoveClose(); return; }
+    if (CAL_EDIT) calEditClose();
     if (CAL_MOVE) calMoveClose();
   }, true);
   $("dayClear").addEventListener("click", () => { view.day = null; view.cusId = null; cusFormReset(); renderCalendar(); renderList(); });
@@ -5272,6 +5377,11 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (cl) { e.preventDefault(); e.stopPropagation(); cusDel(cl.dataset.cusDel); return; }
     if (cusActionClick(e)) { e.preventDefault(); e.stopPropagation(); return; }
     if (e.target.closest("form[data-cus-form]")) return;  /* 폼 안 입력은 카드 선택으로 번지지 않게 */
+    const ce = e.target.closest("[data-cal-edit]");
+    if (ce) { e.preventDefault(); e.stopPropagation(); calEditOpen(ce.dataset.calEdit); return; }
+    const mcx = e.target.closest("[data-cal-meta-cancel]");
+    if (mcx) { e.preventDefault(); e.stopPropagation(); calEditClose(); return; }
+    if (e.target.closest("form[data-cal-meta-form]")) return;
     const mv = e.target.closest("[data-cal-move]");
     if (mv) { e.preventDefault(); e.stopPropagation(); calMoveOpen(mv.dataset.calMove); return; }
     const qk = e.target.closest("[data-cal-quick]");
@@ -5573,6 +5683,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     { name: "pinned", key: LS.pinList, label: "📌 고정한 메일" },
     { name: "cal", key: LS.cal2, label: "📅 캘린더 등록" },
     { name: "cus", key: LS.cus, label: "📅 직접 일정" },
+    { name: "calmeta", key: LS.calMeta, label: "✏️ 캘린더 표시 제목·메모" },
     { name: "rules", key: LS.rules, label: "⚙️ 분류 규칙" },
     { name: "brief", key: LS.brief, label: "☀️ 브리핑 숨김" },
   ];
@@ -5651,7 +5762,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   /* 내려받은 값을 메모리 캐시에도 반영한다(STORE·PINS·CAL·CUS·RULES는 캐시를 쓰므로 비운다) */
   function cyReload() {
     STORE = loadState();
-    PINS = null; CAL = null; CUS = null; RULES = null;
+    PINS = null; CAL = null; CUS = null; RULES = null; CAL_META = null;
     rulesLoad();
   }
   function cyMerge(remoteDoc) {
@@ -6019,7 +6130,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function reloadLocalState() {
     STORE = loadState();
-    ADDR = null; CAL = null; CUS = null; RULES = null;
+    ADDR = null; CAL = null; CUS = null; RULES = null; CAL_META = null;
     try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (DATA && PORTAL_READY && $("app") && !$("app").hidden) { try { renderAll(); } catch (e) {} }
   }
