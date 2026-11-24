@@ -2343,7 +2343,9 @@ def classify(item: dict) -> None:
     sender = item.get("sender") or ""
     email = (item.get("senderEmail") or "").lower()
     name = re.sub(r"\s*\(.*?\)\s*", " ", sender).strip()
-    to_me = item.get("recipientRole") == "To"
+    # v1.2.14 — 수신 구분(recipientRole)이 낡았거나 비어 있어도(옛 수집분·스레드 병합분),
+    #           실제 수신(To) 명단에 내 주소가 있으면 수신으로 보고 🔴 즉시로 분류한다.
+    to_me = item.get("recipientRole") == "To" or _item_to_me(item)
 
     item["mentionedUser"] = mentions_me(body) or mentions_me(title)   # 제목 지목도 포함(v1.2.12)
     item["isVip"] = False
@@ -2402,6 +2404,29 @@ def classify(item: dict) -> None:
             and (gm_sender or ship_hits >= 2) and ship_hits >= 2):
         item["priority"] = 2
         item["priorityReason"] = f"{P2_LABEL} · 해외물류/선적 건 (내가 지목된 건 아님)"
+
+
+def repair_to_priority(items: list[dict]) -> int:
+    """수신(To)인데 🔴이 아닌 항목을 다시 분류한다 (v1.2.14).
+
+    v1.2.12 이전에 만들어진 항목은 데이터의 priority 가 2 로 남아 있어, 화면이나 다른 기기가
+    그 값을 그대로 쓰면 수신(To)인데 🟡 로 보인다(사용자 신고: ‘수신인(To)’ + 🟡 흐름 참고).
+    AI 호출 없이 classify() 규칙만 다시 적용하고, 실제로 값이 바뀐 건수만 돌려준다.
+    """
+    fixed = 0
+    for it in items:
+        if not isinstance(it, dict) or it.get("archived"):
+            continue
+        if not (_item_to_me(it) or it.get("recipientRole") == "To"):
+            continue
+        before = (it.get("recipientRole"), it.get("priority"))
+        if it.get("recipientRole") != "To":
+            it["recipientRole"] = "To"
+        if (it.get("priority") or 2) != 1:
+            classify(it)
+        if (it.get("recipientRole"), it.get("priority")) != before:
+            fixed += 1
+    return fixed
 
 
 # ────────────────────────────────────────────────────────────── Gemini
@@ -3229,6 +3254,21 @@ def _norm_title(title: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _item_to_me(item: dict) -> bool:
+    """항목(item)의 수신(To) 명단에 로그인 사용자가 직접 들어 있는가 (v1.2.14).
+
+    데이터의 `recipientRole` 은 옛 수집분·스레드 병합분에서 낡아 있을 수 있어(수신인데 CC 로 남는 등)
+    등급을 정할 때는 저장된 구분값과 별개로 실제 수신 명단을 다시 본다.
+    """
+    target = (OWNER.get("email") or ME or "").strip().lower()
+    if not target:
+        return False
+    for raw in item.get("to") or []:
+        if _addr_email(raw) == target:
+            return True
+    return False
+
+
 def _is_to(mail: dict, me: str | None = None) -> bool:
     """내가 받는사람(To)인지. me 를 주지 않으면 로그인 사용자(OWNER) 기준."""
     target = (me or ME or "").strip().lower()
@@ -3334,6 +3374,10 @@ def merge_into_thread(item: dict, new_item: dict) -> None:
     item.setdefault("thread", []).append(entry)
     item["thread"].sort(key=lambda m: str(m.get("date") or ""))
     item["lastAt"] = max([str(m.get("date") or "") for m in item["thread"]] + [item.get("receivedAt") or ""])[:16]
+    # v1.2.14 — 최신 메일이 나를 수신(To)으로 지정했으면 항목의 수신 구분도 따라 올린다
+    #           (옛 코드는 등급만 올려 ‘수신인(To)’ 배지와 등급이 어긋났다)
+    if new_item.get("recipientRole") == "To":
+        item["recipientRole"] = "To"
     # 최신 메일이 내가 봐야 하는 등급이면 항목 등급을 올린다(내리는 경우는 유지 = 사용자가 확인한 것 보호)
     if new_item["priority"] < (item.get("priority") or 3):
         item["priority"] = new_item["priority"]
@@ -3461,7 +3505,12 @@ def sync(args: argparse.Namespace) -> dict:
     report["new_sent"] = [{"mf_no": m["mf_no"], "subject": m["subject"], "receivedAt": m["receivedAt"]} for m in sent]
 
     drafts_refreshed = refresh_reply_drafts(items)   # 옛 답장 초안 정리 (v1.2.8)
-    if not inbox and not sent and not is_new and not contacts_added and not drafts_refreshed:
+    # v1.2.14 — 새 메일이 없어도, 수신(To)인데 🟡로 남은 항목은 규칙만 다시 적용해 바로잡는다
+    to_repaired = repair_to_priority(items)
+    if to_repaired:
+        report["toRepaired"] = to_repaired
+    if (not inbox and not sent and not is_new and not contacts_added
+            and not drafts_refreshed and not to_repaired):
         report["changed"] = False
         return report
 
@@ -3508,7 +3557,7 @@ def sync(args: argparse.Namespace) -> dict:
     if drafts_refreshed:                      # 옛 답장 초안 3종 → 실무형 3안 (v1.2.8)
         report["draftsRefreshed"] = drafts_refreshed
     changed = bool(refreshed or drafts_refreshed or added or report["replied"] or contacts_added
-                   or any(m.get("merged_into") for m in report["new_inbox"]))
+                   or to_repaired or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
     report["changed"] = changed

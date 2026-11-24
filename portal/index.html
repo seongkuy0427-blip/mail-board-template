@@ -553,6 +553,45 @@
   .badge.reply-tog:active{transform:scale(.96)}
   .badge.reply-tog:focus-visible{outline:2px solid var(--brand); outline-offset:1px}
   .badge.reply-tog .arw{font-size:8px; opacity:.7; line-height:1}
+  /* 🏷️ 목록 행 분류 드롭다운 (v1.2.14) — 메일을 열지 않고 행에서 등급 규칙을 정한다 */
+  .badge.b-rank{display:inline-flex; align-items:center; gap:3px; font-family:inherit; cursor:pointer;
+    border:1px solid transparent; line-height:1.35; transition:background .12s, transform .06s}
+  .badge.b-rank:hover{filter:brightness(.96)}
+  .badge.b-rank:active{transform:scale(.96)}
+  .badge.b-rank:focus-visible{outline:2px solid var(--brand); outline-offset:1px}
+  .badge.b-rank .arw{font-size:8px; opacity:.65; line-height:1}
+  .badge.b-rank .rk-tx{margin-left:1px; font-weight:600}
+  @media (max-width:760px){ .row .rside .b-rank .rk-tx{display:none} }
+  .badge.b-rank.rk1{background:var(--red-weak); color:#b02a30; border-color:#f6d6d8}
+  .badge.b-rank.rk2{background:var(--brand-weak); color:var(--brand); border-color:#dcdef5}
+  .badge.b-rank.rk3{background:var(--gray-weak); color:var(--ink-2); border-color:#e9e9ec}
+  #rankPop{position:fixed; z-index:130; width:238px; padding:9px 10px 10px; background:#fff;
+    border:1px solid var(--line); border-radius:10px; box-shadow:0 14px 34px rgba(15,17,26,.16)}
+  #rankPop[hidden]{display:none}
+  #rankPop .rk-h{margin:0 0 6px; font-size:10.4px; font-weight:700; color:var(--ink-3); letter-spacing:-.01em}
+  #rankPop .rk-mode{display:flex; gap:4px; margin:0 0 6px}
+  #rankPop .rk-mode button{flex:1; height:23px; border:1px solid var(--line); border-radius:6px; background:#fff;
+    font-family:inherit; font-size:10.6px; font-weight:600; color:var(--ink-2); cursor:pointer}
+  #rankPop .rk-mode button.on{background:var(--brand-weak); border-color:#dcdef5; color:var(--brand)}
+  #rankPop .rk-who{display:block; margin:0 0 6px; font-size:11px; font-weight:700; color:var(--ink);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  #rankPop .rk-kw{width:100%; box-sizing:border-box; height:25px; padding:0 7px; border:1px solid var(--line);
+    border-radius:6px; font-family:inherit; font-size:11px; color:var(--ink)}
+  #rankPop .rk-sug{display:flex; flex-wrap:wrap; gap:4px; margin:5px 0 0}
+  #rankPop .rk-sug button{padding:2px 7px; border:1px solid var(--line); border-radius:999px; background:#fafafa;
+    font-family:inherit; font-size:10.2px; color:var(--ink-2); cursor:pointer}
+  #rankPop .rk-sug button:hover{background:#f4f7fc}
+  #rankPop .rk-opts{display:flex; flex-direction:column; gap:3px; margin:7px 0 0}
+  #rankPop .rk-opts button{display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:6px;
+    border:1px solid transparent; background:#fff; text-align:left; font-family:inherit; font-size:11.2px;
+    font-weight:600; color:var(--ink-2); cursor:pointer}
+  #rankPop .rk-opts button:hover{background:#f4f7fc}
+  #rankPop .rk-opts button.on{border-color:#dcdef5; background:var(--brand-weak); color:var(--brand)}
+  #rankPop .rk-opts .ck{margin-left:auto; font-size:9.8px; font-weight:700}
+  #rankPop .rk-clear{width:100%; margin:6px 0 0; padding:4px 0; border:1px dashed var(--line); border-radius:6px;
+    background:#fff; font-family:inherit; font-size:10.6px; font-weight:600; color:var(--ink-3); cursor:pointer}
+  #rankPop .rk-clear:hover{color:#b02a30; border-color:#f0c9cb}
+  #rankPop .rk-note{margin:6px 0 0; font-size:10.2px; line-height:1.45; color:#8a5320}
   .b-vip{background:#fdf6ec; color:#8a5320}
   .b-to{background:var(--green-weak); color:var(--green)}
   .b-cc{background:var(--gray-weak); color:var(--ink-2)}
@@ -1469,7 +1508,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.11</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.14</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1560,6 +1599,8 @@
   <div id="drawerContent"></div>
 </aside>
 <div class="toast" id="toast"></div>
+<!-- 🏷️ 목록 행 분류 드롭다운 (v1.2.14) — 행의 [🔴 즉시 ▾] 를 누르면 이 자리에 뜬다 -->
+<div id="rankPop" class="rk-pop" role="menu" aria-label="앞으로 자동 분류" hidden></div>
 
 <!-- ============ ⚙️ 분류 규칙 설정 (이 기기에서만 저장) ============ -->
 <div id="rulesModal" role="dialog" aria-modal="true" aria-label="분류 규칙 설정" aria-hidden="true">
@@ -1680,7 +1721,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.13").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.14").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -1751,6 +1792,7 @@
   let HIST_SHOWN = HIST_PAGE, HIST_Q = null;
   let STORE = loadState();
   let view = { tab: "p1", q: "", sort: "recent", day: null, ym: null, sender: "all", group: false, replyOnly: false, showDone: false, openId: null, calOpen: false, cusId: null, cusInbox: true, cusSent: true, kpi: "" };
+  let RKP = { id: null, mode: "sender", kw: "" };   /* 🏷️ 목록 행 분류 드롭다운 상태 (v1.2.14) */
 try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
 
   const $ = (id) => document.getElementById(id);
@@ -2190,9 +2232,18 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
      ⚪ 단순 공유 규칙이 걸려 있어도 이런 메일은 흐름 참고 아래로 내려가지 않는다(예외 안전장치). */
   function isProtectedItem(it) {
     if (!it) return false;
-    if (String(it.recipientRole || "") === "To") return true;
+    const role = String(it.recipientRole || "").trim().toLowerCase();
+    if (role === "to") return true;
     if (it.mentionedUser) return true;
-    const nm = String((DATA && DATA.owner && DATA.owner.name) || "").trim();
+    /* v1.2.14 — 데이터의 수신 구분(recipientRole)이 낡았거나 비어 있어도(옛 수집분·스레드 병합분),
+       실제 수신(To) 명단에 내 주소가 있으면 수신으로 본다. ‘수신인(To)’인데 🟡로 남던 원인. */
+    const owner = (DATA && DATA.owner) || {};
+    const myEm = String(owner.email || "").toLowerCase().trim();
+    if (myEm) {
+      const to = Array.isArray(it.to) ? it.to : String(it.to || "").split(/[,;]/);
+      for (let i = 0; i < to.length; i++) if (String(to[i] || "").toLowerCase().indexOf(myEm) >= 0) return true;
+    }
+    const nm = String(owner.name || "").trim();
     return !!nm && String(it.title || "").indexOf(nm) >= 0;
   }
   /* 이 메일에 적용되는 ‘내 규칙’ — 없으면 null. 발신자 규칙을 먼저 보고 키워드 규칙을 본다. */
@@ -3754,6 +3805,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         (it.imageCount ? " · 🖼 " + it.imageCount + "장" : "") +
         "</span></span>" +
       '<span class="rside">' + (isArchived(it) ? '<span class="badge b-arch">' + ((it.mailbox === "sent") ? "📤 보낸" : "📥 받은") + " · 이전 기록</span>" : "") +
+        (isArchived(it) ? "" : rankTogHtml(it)) +
         (d3 ? d3Badge(d3) : "") +
         '<button type="button" class="badge tog b-pin' + (pin ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (pin ? "true" : "false") + '" title="' +
           esc(pin ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다" : "📌 고정 — 누르면 원래 탭에서 ‘📌 고정’ 탭으로 옮겨집니다") +
@@ -3946,6 +3998,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   function mbPopNext(attr, val) { if (!MB_REDUCE) MB_POP = { attr: attr, val: String(val) }; }
   function renderList() {
     renderListBody();
+    rankPopSync();           /* 다시 그려도 그 메일 행이 남아 있으면 드롭다운은 그대로 둔다 (v1.2.14) */
     const w = $("listWrap"); if (!w) return;
     if (MB_FADE) {
       MB_FADE = false;
@@ -4547,14 +4600,24 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (b2 && top) b2.scrollTop = top;
     syncActiveRows();
   }
+  /* 상세 패널 원클릭 — 행 드롭다운과 같은 적용기(rulesApplyTo)를 쓴다 (v1.2.14) */
   function rqSet(it, p) {
     if (!it || !isRank(p)) return;
+    const kw = RQ.mode === "kw" ? String(RQ.kw || rqDefaultKw(it) || "") : "";
+    if (rulesApplyTo(it, p, RQ.mode, kw) === "") return;
+    refreshDrawer();
+    markP1Seen();
+  }
+  /* 규칙 적용기 — 행 드롭다운과 상세 원클릭이 함께 쓴다 (v1.2.14).
+     같은 등급을 다시 고르면 해제하고, 직전 상태는 [실행 취소] 로 되돌린다. */
+  function rulesApplyTo(it, p, mode, kw) {
+    if (!it || !isRank(p)) return "";
     if (!RULES) rulesLoad();
     const before = rulesSnapshot();
     let msg = "";
-    if (RQ.mode === "kw") {
-      const text = String(RQ.kw || rqDefaultKw(it) || "").trim();
-      if (!text) { toast("제목 키워드를 먼저 입력해 주세요", 2600); return; }
+    if (mode === "kw") {
+      const text = String(kw || "").trim();
+      if (!text) { toast("제목 키워드를 먼저 입력해 주세요", 2600); return ""; }
       const i = RULES.keywords.findIndex((k) => String(k.text).toLowerCase() === text.toLowerCase());
       if (i >= 0 && RULES.keywords[i].priority === p) {
         RULES.keywords.splice(i, 1);
@@ -4575,14 +4638,131 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         msg = "‘" + (s.name || s.email || s.key) + "’ 발신 메일이 ‘" + rqRankName(p) + "’ 규칙으로 설정되었습니다";
       }
     }
-    if (!rulesPersist(RULES)) return;
+    if (!rulesPersist(RULES)) return "";
     renderAll();
-    refreshDrawer();
-    markP1Seen();
     const note = (p === 3 && isProtectedItem(it)) ? " · 이 메일은 수신(To)·지목 건이라 ‘흐름 참고’로 보호됩니다" : "";
     toastUndo(msg + note, "실행 취소", () => {
-      if (rulesPersist(before)) { renderAll(); refreshDrawer(); toast("규칙을 되돌렸습니다", 2200); }
+      if (rulesPersist(before)) { renderAll(); if (view.openId) refreshDrawer(); toast("규칙을 되돌렸습니다", 2200); }
     }, 7000);
+    return msg;
+  }
+  /* 규칙 해제 (기본으로) — 지금 기준(발신자/제목 키워드)에 걸린 내 규칙만 지운다 */
+  function rulesClearFor(it, mode, kw) {
+    if (!it) return "";
+    if (!RULES) rulesLoad();
+    const before = rulesSnapshot();
+    let msg = "";
+    if (mode === "kw") {
+      const text = String(kw || "").trim().toLowerCase();
+      const i = text ? RULES.keywords.findIndex((k) => String(k.text).toLowerCase() === text) : -1;
+      if (i < 0) { toast("해제할 제목 키워드 규칙이 없습니다", 2400); return ""; }
+      const label = RULES.keywords[i].text;
+      RULES.keywords.splice(i, 1);
+      msg = "‘" + label + "’ 제목 키워드 규칙을 해제했습니다 — 기본 분류로 돌아갑니다";
+    } else {
+      const s = rqSender(it);
+      const i = RULES.senders.findIndex((x) => x.key === s.key || (s.email && String(x.email || "").toLowerCase() === s.email));
+      if (i < 0) { toast("해제할 발신자 규칙이 없습니다", 2400); return ""; }
+      const label = RULES.senders[i].name || RULES.senders[i].email || RULES.senders[i].key;
+      RULES.senders.splice(i, 1);
+      msg = "‘" + label + "’ 발신 메일 규칙을 해제했습니다 — 기본 분류로 돌아갑니다";
+    }
+    if (!rulesPersist(RULES)) return "";
+    renderAll();
+    if (view.openId) refreshDrawer();
+    toastUndo(msg, "실행 취소", () => {
+      if (rulesPersist(before)) { renderAll(); if (view.openId) refreshDrawer(); toast("규칙을 되돌렸습니다", 2200); }
+    }, 7000);
+    return msg;
+  }
+
+  /* ---------------- 🏷️ 목록 행 분류 드롭다운 (v1.2.14) ----------------
+     목록 행 오른쪽 버튼 줄의 [🔴 즉시 ▾] 하나로, 메일을 열지 않고 그 발신자(또는 제목 키워드)의
+     앞으로 자동 분류 규칙을 정한다. 저장소·판정은 상세 원클릭 규칙과 같다
+     (localStorage mb_rules_v1 · 포털은 /api/state rules). */
+  function rankName(p) { return p === 1 ? "🔴 즉시" : p === 2 ? "🟡 흐름 참고" : "⚪ 단순 공유"; }
+  function rankEmoji(p) { return p === 1 ? "🔴" : p === 2 ? "🟡" : "⚪"; }
+  function rankText(p) { return p === 1 ? "즉시" : p === 2 ? "흐름 참고" : "단순 공유"; }
+  function rankTogHtml(it) {
+    const p = priorityOf(it), rl = ruleForItem(it);
+    const t = "이 메일을 열지 않고 바로 분류 — 발신자(또는 제목 키워드) 자동 규칙을 정합니다" +
+      (rl ? " · 지금은 ‘" + rl.label + "’ " + (rl.kind === "sender" ? "발신자" : "제목 키워드") + " 규칙 적용 중"
+          : " · 지금은 기본 분류(" + rankName(p) + ")");
+    /* 좁은 화면(≤760px)에서는 글자(.rk-tx)를 숨기고 점(🔴/🟡/⚪)만 남겨 버튼 줄이 두 줄로 접히지 않게 한다 */
+    return '<button type="button" class="badge tog b-rank rk' + p + '" data-rank-tog="' + esc(it.id) + '"' +
+      ' aria-haspopup="menu" aria-expanded="false" title="' + esc(t) + '"' +
+      ' aria-label="' + esc("분류 " + rankName(p) + " · 눌러서 자동 분류 규칙 정하기") + '">' +
+      '<span class="rk-em">' + rankEmoji(p) + '</span><span class="rk-tx">' + rankText(p) + '</span>' +
+      '<span class="arw">▾</span></button>';
+  }
+  function rankPopNode() {
+    const el = $("rankPop");
+    if (!el) return null;
+    if (el.hidden !== false && el.hidden !== true) el.hidden = true;
+    return el;
+  }
+  /* 목록을 다시 그려도(60초 자동 동기화 등) 대상 행이 남아 있으면 드롭다운을 유지하고,
+     그 메일이 목록에서 사라졌을 때만 닫는다. */
+  function rankPopSync() {
+    const el = $("rankPop");
+    if (!el || el.hidden !== false) return;
+    if (!RKP.id || !document.querySelector('[data-rank-tog="' + RKP.id + '"]')) rankPopClose();
+  }
+  function rankPopClose() {
+    const el = $("rankPop");
+    if (el && el.hidden === false) el.hidden = true;
+    RKP.id = null;
+    const b = document.querySelector('[data-rank-tog][aria-expanded="true"]');
+    if (b && b.setAttribute) b.setAttribute("aria-expanded", "false");
+  }
+  function rankPopHtml(it) {
+    if (!it) return "";
+    if (!RULES) rulesLoad();
+    const isKw = RKP.mode === "kw";
+    const cands = isKw ? rqKeywordCandidates(it) : [];
+    if (isKw && !RKP.kw) RKP.kw = rqDefaultKw(it);
+    const sender = rqSender(it);
+    const act = rqRuleOf(it, RKP.mode, RKP.kw);
+    const p = act ? act.p : 0;
+    const prot = isProtectedItem(it);
+    return '<div class="rk-h">앞으로 자동 분류</div>' +
+      '<div class="rk-mode" role="group" aria-label="규칙 기준">' +
+        '<button type="button" data-rk-mode="sender" class="' + (isKw ? "" : "on") + '">👤 발신자</button>' +
+        '<button type="button" data-rk-mode="kw" class="' + (isKw ? "on" : "") + '">🔤 제목 키워드</button></div>' +
+      (isKw
+        ? '<input type="text" class="rk-kw" id="rkKw" value="' + esc(RKP.kw) + '" maxlength="30" placeholder="제목 키워드 (예: 하치장)" aria-label="제목 키워드">' +
+          (cands.length ? '<div class="rk-sug">' + cands.slice(0, 4).map((c) =>
+            '<button type="button" data-rk-sug="' + esc(c.text) + '">' + esc(c.text) + "</button>").join("") + "</div>" : "")
+        : '<span class="rk-who" title="' + esc(sender.email || "") + '">' + esc(sender.name || sender.email || "발신자 미상") + "</span>") +
+      '<div class="rk-opts" role="group" aria-label="분류 등급">' +
+        [1, 2, 3].map((v) => '<button type="button" role="menuitemradio" aria-checked="' + (p === v ? "true" : "false") +
+          '" data-rk-p="' + v + '" class="' + (p === v ? "on" : "") + '">' + rankName(v) +
+          (p === v ? '<span class="ck">✓ 적용 중</span>' : "") + "</button>").join("") +
+      "</div>" +
+      (act ? '<button type="button" class="rk-clear" data-rk-clear="1">규칙 해제 (기본으로)</button>' : "") +
+      (p === 3 && prot ? '<p class="rk-note">이 메일은 수신(To)·지목 건이라 ‘흐름 참고’로 보호됩니다.</p>' : "");
+  }
+  function rankPopPaint(it) {
+    const el = $("rankPop");
+    if (el && it) el.innerHTML = rankPopHtml(it);
+  }
+  function rankPopOpen(btn, it) {
+    if (!btn || !it) return;
+    const el = rankPopNode();
+    if (!el) return;
+    if (RKP.id === it.id && el.hidden === false) { rankPopClose(); return; }   /* 같은 버튼을 다시 누르면 닫기 */
+    RKP.id = it.id; RKP.mode = "sender"; RKP.kw = "";
+    el.innerHTML = rankPopHtml(it);
+    el.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    /* 버튼 바로 아래에 띄우되 화면 밖으로 넘치지 않게(아래가 좁으면 위로) */
+    const r = btn.getBoundingClientRect();
+    const vw = window.innerWidth || 1024, vh = window.innerHeight || 800;
+    const w = 238, h = el.offsetHeight || 214;
+    const left = Math.min(Math.max(8, r.right - w), Math.max(8, vw - w - 8));
+    const top = (r.bottom + 5 + h > vh - 8) ? Math.max(8, r.top - h - 5) : r.bottom + 5;
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
   }
 
   /* ---------------- 답장 문구 — 실무 상황별 3안 (v1.2.8) ---------------- */
@@ -4829,6 +5009,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
 
   /* ---------------- 상세 드로어 ---------------- */
+  /* v1.2.14 — 상세 상단 배지 줄을 없애 화면에서는 더 쓰지 않는다(다시 필요하면 drawerHtml 에서 부르면 된다). */
   function badgeRow(it) {
     const p = priorityOf(it), d = dueInfo(it), r = replyOf(it), rl = ruleForItem(it);
     const parts = [];
@@ -5709,8 +5890,9 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="img-hint">사진을 누르면 원본 크기로 크게 볼 수 있습니다.</div>'
       : "";
 
+    /* v1.2.14 — 제목 위 상태 배지 줄(등급·수신인·회신·단계)은 지웠다. 등급은 목록 행의 분류
+       드롭다운과 아래 원클릭 규칙 줄에서 보고, 📌 고정 · ✕ 는 제목 옆에 그대로 둔다. */
     return '<div class="dr-head"><div style="flex:1;min-width:0">' +
-        '<div class="badges">' + badgeRow(it) + "</div>" +
         "<h2>" + esc(it.title) + "</h2></div>" +
         '<button type="button" class="dr-pin' + (isPinned(it) ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (isPinned(it) ? "true" : "false") + '" title="' +
           esc(isPinned(it) ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다 (분류·완료와 무관하게 ‘📌 고정’ 탭에 모여 있습니다)" : "📌 고정 — 원래 탭에서 ‘📌 고정’ 탭으로 옮겨 둡니다") + '">📌 ' + (isPinned(it) ? "고정됨" : "고정") + "</button>" +
@@ -6345,6 +6527,52 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const r = e.target.closest("[data-open]"); if (!r) return;
     e.preventDefault(); openDrawer(r.dataset.open);
   });
+  /* 🏷️ 행 분류 드롭다운 — 캡처 단계에서 받아 행 클릭(상세 드로어)으로 번지지 않게 한다 (v1.2.14) */
+  document.addEventListener("click", (e) => {
+    const tg = e.target && e.target.closest ? e.target.closest("[data-rank-tog]") : null;
+    if (tg) {
+      e.preventDefault(); e.stopPropagation();
+      const it = byId(tg.dataset.rankTog);
+      if (it) rankPopOpen(tg, it);
+      return;
+    }
+    const pop = $("rankPop");
+    if (!pop || pop.hidden !== false) return;
+    if (!e.target || !e.target.closest || !e.target.closest("#rankPop")) { rankPopClose(); return; }
+    e.stopPropagation();               /* 메뉴 안쪽 클릭은 드로어·행 클릭으로 넘기지 않는다 */
+    const it = RKP.id ? byId(RKP.id) : null;
+    if (!it) { rankPopClose(); return; }
+    const mk = e.target.closest("[data-rk-mode]");
+    if (mk) {
+      RKP.mode = mk.dataset.rkMode === "kw" ? "kw" : "sender";
+      if (RKP.mode === "kw" && !RKP.kw) RKP.kw = rqDefaultKw(it);
+      rankPopPaint(it);
+      return;
+    }
+    const sg = e.target.closest("[data-rk-sug]");
+    if (sg) { RKP.kw = sg.dataset.rkSug || ""; rankPopPaint(it); return; }
+    const kwNow = RKP.mode === "kw" ? String((($("rkKw") || {}).value) || RKP.kw || "").trim() : "";
+    const pt = e.target.closest("[data-rk-p]");
+    if (pt) {
+      const p = Number(pt.dataset.rkP), mode = RKP.mode;
+      rankPopClose();
+      rulesApplyTo(it, p, mode, kwNow);
+      return;
+    }
+    const cl = e.target.closest("[data-rk-clear]");
+    if (cl) {
+      const mode = RKP.mode;
+      rankPopClose();
+      rulesClearFor(it, mode, kwNow);
+      return;
+    }
+  }, true);
+  /* Esc 로 드롭다운만 닫기(드로어는 그대로) */
+  document.addEventListener("keydown", (e) => {
+    const pop = $("rankPop");
+    if (e.key === "Escape" && pop && pop.hidden === false) { e.stopPropagation(); rankPopClose(); }
+  }, true);
+
   $("backdrop").addEventListener("click", closeDrawer);
   $("drawer").addEventListener("click", async (e) => {
     if (e.target.id === "drClose") { closeDrawer(); return; }

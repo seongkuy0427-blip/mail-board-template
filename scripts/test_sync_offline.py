@@ -874,6 +874,40 @@ def run(pin: str, keep: bool) -> int:
     check("프롬프트에 구체적 결론 규칙·금지 문구", "금지 문구" in sm.SYSTEM_PROMPT
           and "구체적 행위 + 대상/품번·기준" in sm.SYSTEM_PROMPT
           and not sm.ACTION_BANNED_RE.search(sm.SYSTEM_PROMPT))
+    # v1.2.14 — 수신(To) 판정 보강 · 데이터상 To 등급 재분류 (사용자 신고: ‘수신인(To)’ + 🟡 흐름 참고)
+    if not sm.OWNER.get("email"):
+        sm.OWNER["email"] = 'kimtest@chunil.co.kr'
+    sm.ME = sm.OWNER.get("email") or sm.ME
+    _me_addr = sm.OWNER.get("email")
+    quoted = {"id": "m-eop", "title": "RE: [EXTERNAL] RE: EOP자재 재고실사 요청_11/25일(수) 07시",
+               "sender": "류광종 과장 (해외물류부)", "senderEmail": "rgj@chunil.co.kr",
+               "recipientRole": "CC", "priority": 2,
+               "to": ["김정호 <kjh@chunil.co.kr>", f"'김성규' <{_me_addr}>"]}
+    check("수신 명단에 내 주소가 있으면 수신으로 판정", sm._item_to_me(quoted) is True)
+    sm.classify(quoted)
+    check("‘수신인(To)’인데 🟡 로 남지 않는다", quoted["priority"] == 1, str(quoted.get("priority")))
+    check("판정 근거에 수신(To) 표시", "수신인(To)" in str(quoted.get("priorityReason")),
+          str(quoted.get("priorityReason")))
+    cc_only = {"id": "m-ccx", "title": "RE: EOP자재 재고실사 요청", "sender": "류광종 과장 (해외물류부)",
+                "senderEmail": "rgj@chunil.co.kr", "recipientRole": "CC", "priority": 2,
+                "to": ["김정호 <kjh@chunil.co.kr>"], "cc": [f"김성규 <{_me_addr}>"]}
+    sm.classify(cc_only)
+    check("참조(CC)만이면 🟡 흐름 참고 유지", cc_only["priority"] == 2, str(cc_only.get("priority")))
+    stale = dict(quoted, id="m-stale", recipientRole="CC", priority=2, priorityReason="")
+    fixed_n = sm.repair_to_priority([stale, cc_only])
+    check("repair_to_priority — 수신(To)인데 🟡인 항목을 🔴로 되살린다",
+          stale["recipientRole"] == "To" and stale["priority"] == 1 and fixed_n >= 1,
+          f"{stale['recipientRole']}/{stale['priority']}/{fixed_n}")
+    check("repair_to_priority — 참조(CC)는 건드리지 않는다", cc_only["priority"] == 2, str(cc_only.get("priority")))
+    merged = {"id": "m-merge", "title": "RE: EOP자재 재고실사 요청", "recipientRole": "CC", "priority": 2,
+               "receivedAt": "2026-11-20 09:00",
+               "thread": [{"id": "m-old", "date": "2026-11-20 09:00"}]}
+    sm.merge_into_thread(merged, {"thread": [{"id": "m-new", "date": "2026-11-24 10:40"}],
+                                  "priority": 1, "priorityReason": "🔴 즉시 · 나를 수신인(To)으로 지정",
+                                  "recipientRole": "To", "replyStatus": "needs_reply"})
+    check("스레드 병합 — 수신 구분도 최신 메일(To)을 따라간다",
+          merged.get("recipientRole") == "To" and merged.get("priority") == 1,
+          f"{merged.get('recipientRole')}/{merged.get('priority')}")
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)
