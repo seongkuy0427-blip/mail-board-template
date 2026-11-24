@@ -2096,14 +2096,29 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
   async function lockResume() {
     LK.fails = 0;
-    lockHide();
-    if (!DATA) {                  /* F5 로 들어와 잠긴 경우 — 풀린 뒤에 보드를 받는다 */
-      const g = $("gate"); if (g) g.hidden = true;
-      seedShow("내 보드를 불러오는 중…", 8, "");
-      try { await ptPull(); reloadLocalState(); await portalEnter({ id: PORTAL_USER }); }
-      catch (e) { seedHide(); logout(); }
+    if (!DATA) {                  /* F5 로 들어와 잠긴 경우 — 잠금 카드를 띄운 채 보드를 받는다(빈 화면 방지) */
+      const sub = $("slSub"), btn = $("slUnlock");
+      if (sub) sub.textContent = "보드를 불러오는 중…";
+      slErr("");
+      if (btn) { btn.disabled = true; btn.textContent = "불러오는 중…"; }
+      try {
+        await ptPull(); reloadLocalState();
+        await portalEnter({ id: PORTAL_USER });
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = "잠금 해제"; }
+        if (sub) sub.textContent = "4자리 PIN을 입력하면 바로 돌아갑니다";
+        lockRemember(false); lockHide();
+        toast((e && e.message) || "보드를 불러오지 못했습니다 — 다시 로그인해 주세요");
+        logout();
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "잠금 해제"; }
+      seedHide();
+      lockHide();
+      toast("잠금을 풀었습니다");
       return;
     }
+    lockHide();
     $("app").hidden = false; $("gate").hidden = true;
     renderAll(); scheduleAuto(); paintBell(); briefTick();
     toast("잠금을 풀었습니다");
