@@ -47,6 +47,7 @@ import base64
 import datetime as dt
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -93,7 +94,7 @@ MENTION_RE = re.compile(r"(?!x)x")             # 본문 지목 정규식 (이름
 
 # (이름 일치 문자열, 메일주소, 화면 표시 라벨, vipRank, To 조건 필요 여부) — 화면에는 중립 등급명만
 VIPS: list[tuple[str, str, str, int, bool]] = []
-P1_LABEL, P2_LABEL, P3_LABEL = "🔴 즉시 확인", "🟡 흐름 참고", "⚪ 단순 공유"
+P1_LABEL, P2_LABEL, P3_LABEL = "🔴 즉시 확인", "🟡 흐름 참고", "⚪ 기록 보관"
 P3_TITLE_KEYWORDS: tuple[str, ...] = ("출하리스트", "납입요청", "미상차현황")
 
 CFG: dict = {
@@ -172,7 +173,7 @@ def custom_rule_for(item: dict, protected: bool = False):
     """이 메일에 걸리는 내 규칙 → (priority, 설명) 또는 None.
 
     화면(index.html ruleForItem)과 같은 순서: 발신자 규칙을 먼저 보고, 없으면 제목 키워드.
-    ⚪ 단순 공유(3) 규칙은 보호 메일(수신 To·이름 지목)에는 걸지 않는다(예외 안전장치).
+    ⚪ 기록 보관(3) 규칙은 보호 메일(수신 To·이름 지목)에는 걸지 않는다(예외 안전장치).
     """
     email = (item.get("senderEmail") or "").strip().lower()
     sender = item.get("senderName") or item.get("sender") or ""
@@ -1652,8 +1653,8 @@ def clean_body(text: str) -> str:
 #   ② 회사 슬로건·기밀 면책·주소/TEL/Fax 같은 서명 잡음만 걷어 내고 **부서·직급 각인 1줄은 남긴다**.
 #   ③ 사내 조직(우리 부서 인원 + To/CC 인원의 부서)을 프롬프트 컨텍스트로 함께 준다.
 #   ④ 같은 스레드가 이어지면 전체를 다시 보내지 않고 '누적 타임라인 + 새 메일 1통'만 보낸다(증분).
-#   ⑤ 우리 부서와 무관한 참조(CC)·단순 공유 메일은 무거운 분석을 건너뛴다(사용량 절감).
-#      — 건너뛴 메일은 화면에서 [✨ AI 요약 실행] 으로 그때만 정밀 분석할 수 있다(포털).
+#   ⑤ 🔴 즉시 확인·🟡 흐름 참고는 처음부터 3단 정밀 분석한다(v1.2.21 — 경량 요약 분기 제거).
+#      ⚪ 기록 보관만 AI 를 부르지 않고, 필요할 때 화면의 [✨ AI 요약 실행] 으로 정밀 분석한다(포털).
 OUR_DIVISION = ""                   # (개인판은 '납입관리부') CFG["our_dept"] 가 있으면 그것이 우선
 ANALYSIS_BODY_CHARS = 7000          # AI 에 보내는 본문 상한(전체 스레드 포함)
 THREAD_COMPRESS_AT = 10             # 이 통수 이상이면 중간 회신을 1줄로 압축
@@ -1662,7 +1663,7 @@ THREAD_KEEP_RECENT = 4              # 압축할 때 원문을 그대로 두는 �
 THREAD_LINE_CHARS = 90              # 압축된 중간 메일 1줄 길이
 CACHE_TIMELINE_MAX = 16             # 스레드 캐시에 남기는 타임라인 줄 수
 THREAD_CACHE_MAX = 200              # 스레드 캐시 키 수 상한(data 파일 크기 보호)
-SKIP_SIMPLE_SUMMARY = "단순 공유 메일로 분류되어 AI 분석을 생략했습니다."
+SKIP_SIMPLE_SUMMARY = "기록 보관 메일로 분류되어 AI 분석을 생략했습니다."
 LIGHT_TAG = "[타 부서 주담당 · 단순 참고]"
 
 THREAD_START_RE = re.compile(
@@ -2077,6 +2078,48 @@ def _first_to_label(mail: dict, contacts: dict | None = None) -> str:
     return ""
 
 
+# ── 발신자가 우리 부서(팀원) 또는 나인가 (v1.2.21) ───────────────────────────────
+#  납입1팀 강한 사원 → 경영지원팀 정하건 처럼 **우리 팀원이 보낸 메일**을 "강한에게 결과 회신" 으로
+#  거꾸로 결론짓던 버그. 발신자가 우리 쪽이면 그 메일은 이미 우리가 회신·송부한 것이므로
+#  다시 회신하라는 결론을 내지 않는다.
+REPLY_SUBJECT_RE = re.compile(r"^\s*(?:re|fw|fwd|답장|전달)\s*[:：]", re.I)
+REPLY_DONE_RE = re.compile(
+    r"(?:해당자\s*(?:가|는|도)?\s*없|해당\s*없|송부\s*(?:드립|드렸|완료|하였|했)|회신\s*(?:드립|드렸|완료|하였|했)|"
+    r"전달\s*(?:드립|드렸|완료|하였|했)|확인\s*완료|처리\s*(?:완료|하였|했)|조치\s*(?:완료|하였|했)|"
+    r"보고\s*(?:드립|드렸|완료|하였|했)|제출\s*(?:하였|했|완료)|발송\s*(?:하였|했|완료)|"
+    r"자료\s*(?:송부|전달|첨부)|첨부\s*(?:드립|하였|했))"
+)
+
+
+def sender_is_ours(mail: dict, contacts: dict | None = None) -> bool:
+    """발신자가 나 또는 우리 부서(납입1팀) 팀원인가 — 이미 우리가 보낸 메일인지 가르는 기준."""
+    contacts = contacts or {}
+    email = (mail.get("from_email") or _addr_email(mail.get("from_raw") or "") or "").lower()
+    me = (OWNER.get("email") or ME or "").lower()
+    if email and me and email == me:
+        return True
+    info = contacts.get(email) or {}
+    if info and is_our_team(str(info.get("dept") or "")):
+        return True
+    raw = mail.get("from_raw") or ""
+    name = re.sub(r"\s+", "", _clean(_sender_parts(raw, email, contacts)[0] or ""))
+    if len(name) >= 2:
+        for member in our_members(contacts):
+            if re.sub(r"\s+", "", member.get("name") or "") == name:
+                return True
+    return False
+
+
+def _ours_reply_conclusion(mail: dict, contacts: dict | None, done: bool) -> tuple[str, str]:
+    """우리 부서가 보낸 메일의 결론 — (우리 부서 할 일, 내 할 일)."""
+    to_label = _first_to_label(mail, contacts) or "수신자"
+    if done:
+        return (f"[회신·송부 완료 · 우리 부서(발신자) → {to_label}에게 처리 완료]",
+                "[추가 회신 없음 · 처리 이력 확인용]")
+    return (f"[우리 부서 발신 · {to_label}의 회신 대기 (내가 회신할 건 아님)]",
+            "[추가 회신 없음 · 상대 회신만 지켜보면 됩니다]")
+
+
 def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
     """수신(To)/참조(CC) 위치 · 본문 지목 · 회신 요청 대상 · 업무 키워드를 교차해 주담당을 정한다.
 
@@ -2102,7 +2145,8 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
     label = our_dept_label()
     # 본문이 타 부서 업무 중심이고 우리 팀 지목도, 우리 업무 신호도 없으면 주담당을 넘긴다
     other_main = bool(other) and other_score >= 2 and not mentioned and our_hits == 0
-    ours = (to_me or in_to or mentioned) and not other_main
+    sender_ours = sender_is_ours(mail, contacts)      # v1.2.21 — 발신자가 우리 부서(팀)인가
+    ours = (to_me or in_to or mentioned) and not other_main and not sender_ours
     to_label = "" if ours else _first_to_label(mail, contacts)
     if ours:
         main = label
@@ -2126,10 +2170,20 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
                  + (" · 인용·서명에 우리 팀 이름이 보이지만 새 본문에 직접 요청은 없음" if quoted_mention else ""))
     else:
         basis = "참조(CC)만 있고 본문 지목이 없어 주담당 판별 어려움 — 원문 확인 권장"
+    reply_done = False
+    if sender_ours:
+        # v1.2.21 — 우리가 이미 보낸 메일(RE: 답장·회신/송부 완료 표현)은 발신자에게 다시 회신하지 않는다
+        reply_done = bool(REPLY_SUBJECT_RE.match(str(mail.get("subject") or ""))) \
+            or bool(REPLY_DONE_RE.search(fresh or ""))
+        main = (f"{to_label}(수신) · 우리 부서({label})는 발신" if to_label
+                else f"우리 부서({label}) 발신")
+        basis = ("발신자가 우리 부서(팀) — 우리가 이미 보낸 메일"
+                 + (" · 본문에 회신·송부 완료 표현" if reply_done else ""))
     return {"to_me": to_me, "in_to": in_to, "mentioned": mentioned,
             "ours": ours, "other": (other or (to_label if to_label else "")) if not ours else "",
             "other_kind": ("dept" if other else ("person" if (to_label and not ours) else "")),
-            "main": main, "basis": basis}
+            "main": main, "basis": basis,
+            "sender_ours": sender_ours, "reply_done": reply_done}
 
 
 _DUE_WEEK = "월화수목금토일"
@@ -2203,6 +2257,8 @@ def _request_target(mail: dict) -> str:
 def concrete_actions(mail: dict, contacts: dict | None = None, *, ruling: dict | None = None) -> tuple[str, str]:
     """[구체적 행위 + 대상/품번 + 회신 대상자] 형태의 (우리 부서 할 일, 내 할 일)."""
     ruling = ruling or dept_ruling(mail, contacts)
+    if ruling.get("sender_ours"):     # v1.2.21 — 우리가 보낸 메일: 발신자에게 회신하라는 결론을 내지 않는다
+        return _ours_reply_conclusion(mail, contacts, bool(ruling.get("reply_done")))
     target = _request_target(mail)
     who = _sender_phrase(mail, contacts) or "요청자"
     text = _mail_text(mail)
@@ -2228,7 +2284,7 @@ def concrete_actions(mail: dict, contacts: dict | None = None, *, ruling: dict |
 
 
 def _share_actions(mail: dict) -> tuple[str, str]:
-    """⚪ 단순 공유 — 일이 없더라도 이유와 참조 범위를 업무적인 표현으로 남긴다."""
+    """⚪ 기록 보관 — 일이 없더라도 이유와 참조 범위를 업무적인 표현으로 남긴다."""
     target = _request_target(mail)
     return (f"[직접 조치 없음 · {target} 일상 공유 · 참조 흐름 파악]",
             "[참조 · 업무 흐름 파악 (별도 회신 불필요)]")
@@ -2238,6 +2294,15 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
     """AI 가 상투어·일이 없다는 식의 마무리를 냈거나 주담당을 잘못 올렸으면 바로잡는다."""
     ruling = dept_ruling(mail, contacts)
     fb_our, fb_my = concrete_actions(mail, contacts, ruling=ruling)
+    if ruling.get("sender_ours"):
+        # v1.2.21 — AI 가 ‘[직접 회신 필요] … → 발신자에게 회신’ 으로 써도 우리가 보낸 메일이면 바로잡는다
+        result["ourDeptAction"] = fb_our
+        result["myAction"] = fb_my
+        result["mainDept"] = ruling["main"]
+        result["deptBasis"] = str(result.get("deptBasis") or "").strip() or ruling["basis"]
+        result["replyStatus"] = "no_reply_needed"
+        result["actionItems"] = []
+        return result
     our = str(result.get("ourDeptAction") or "").strip()
     my = str(result.get("myAction") or "").strip()
     bad = lambda t: (not t) or any(b in t for b in ACTION_BANNED) or bool(ACTION_BANNED_RE.search(t))
@@ -2334,8 +2399,484 @@ def is_detailed_summary(text: str) -> bool:
     return all(k in s for k in ("🔄", "🎯", "✅"))
 
 
+# ══════════════════════════════════════════════════════════════ 본문 인용 스레드 (v1.2.21)
+#  메일함에 1통만 들어와도 본문 아래에는 `-----Original Message-----` / `From:` · `Sent:` /
+#  `보낸사람:` · `보낸 날짜:` 같은 인용 블록이 붙어 있다. 히스토리가
+#  "이 메일이 스레드의 첫 메일입니다"로 끝나지 않도록 인용 블록을 시간순 스레드에 합친다.
+Q_FIELD_KEYS = {
+    "from": "from", "보낸사람": "from",
+    "sent": "date", "date": "date", "보낸날짜": "date", "보낸때": "date", "일시": "date",
+    "subject": "subject", "제목": "subject",
+    "to": "to", "받는사람": "to", "cc": "cc", "참조": "cc",
+}
+Q_FIELD_RE = re.compile(r"^\s*(?:>\s*)?([A-Za-z가-힣][A-Za-z가-힣 ]{0,9}?)\s*[:：]\s*(.*)$")
+Q_SEP_RE = re.compile(r"^\s*[>\s]*(?:-{2,}\s*)?(?:original\s*message|원본\s*메일|메일\s*원본|"
+                      r"forwarded\s*message|전달된\s*메일|전달\s*메일)(?:\s*-{2,})?\s*$", re.I)
+Q_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+
+
+def quoted_field(line: str) -> tuple[str | None, str]:
+    """`From:` · `보낸 사람:` 같은 인용 머리표 한 줄 → (field, value). 머리표가 아니면 (None, "")."""
+    m = Q_FIELD_RE.match(str(line or ""))
+    if not m:
+        return None, ""
+    key = re.sub(r"\s+", "", m.group(1)).lower()
+    return Q_FIELD_KEYS.get(key), _clean(m.group(2) or "")
+
+
+def _q_clock(text: str) -> tuple[int, int, bool]:
+    """인용 날짜 문자열에서 시:분 — (시, 분, 시각이 있었나). `오후`/`PM` 이면 24시간으로 올린다."""
+    m = re.search(r"(?<!\d)(\d{1,2})\s*[:시]\s*(\d{2})?(?!\d)", text or "")
+    if not m:
+        return 0, 0, False
+    hh, mm = int(m.group(1)), int(m.group(2) or 0)
+    around = (text or "")[:m.end() + 3]
+    if hh < 12 and (re.search(r"오후", around) or re.search(r"\bpm\b", text or "", re.I)):
+        hh += 12
+    if hh == 12 and (re.search(r"오전", around) or re.search(r"\bam\b", text or "", re.I)):
+        hh = 0
+    return hh, mm, True
+
+
+def _q_date(raw: str) -> str:
+    """인용 날짜 → `YYYY-MM-DD HH:MM` (한국식·영문식 모두). 알아보지 못하면 원문을 짧게 남긴다."""
+    s = _clean(raw or "").strip()
+    if not s:
+        return ""
+    y = mo = d = 0
+    rest = s
+    m = re.search(r"(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        rest = s[m.end():m.end() + 20]
+    if not y:
+        m2 = re.search(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(20\d{2})", s)      # Nov 24, 2026
+        if m2 and m2.group(1)[:3].lower() in Q_MONTHS:
+            y, mo, d = int(m2.group(3)), Q_MONTHS[m2.group(1)[:3].lower()], int(m2.group(2))
+            rest = s[m2.end():m2.end() + 20]
+    if not y:
+        m3 = re.search(r"(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(20\d{2})", s)        # 24 Nov 2026
+        if m3 and m3.group(2)[:3].lower() in Q_MONTHS:
+            y, mo, d = int(m3.group(3)), Q_MONTHS[m3.group(2)[:3].lower()], int(m3.group(1))
+            rest = s[m3.end():m3.end() + 20]
+    if not y or not (1 <= mo <= 12 and 1 <= d <= 31):
+        return _clip(s, 24)
+    hh, mm, has = _q_clock(rest or s)
+    return f"{y:04d}-{mo:02d}-{d:02d}" + (f" {hh:02d}:{mm:02d}" if has else "")
+
+
+def _q_from(raw: str) -> str:
+    """`"염주희" <johhee.yeom@gm.com>` → `염주희 (GM)` — 화면 스레드 줄에 쓰는 발신자 표기."""
+    s = _clean(raw or "").strip().strip(";").strip()
+    if not s:
+        return ""
+    email = ""
+    m = re.search(r"<([^<>@\s]+@[^<>\s]+)>", s)
+    if m:
+        email = m.group(1)
+    name = re.sub(r"<[^>]*>", "", s).strip().strip('"\'').strip()
+    if not name and email:
+        name = email.split("@")[0]
+    org = ""
+    if email:
+        dom = email.split("@")[-1].lower()
+        if dom == "gm.com":
+            org = "GM"
+        elif dom and dom != internal_domain().lower():
+            org = dom.split(".")[0].upper()
+    label = _clip(name, 20)
+    return f"{label} ({org})" if label and org else label
+
+
+def _q_body_line(lines: list[str]) -> str:
+    """인용 블록의 첫 알맹이 줄 — 인사·서명·슬로건·빈 줄은 건너뛴다."""
+    cands: list[str] = []
+    for ln in lines:
+        t = _clean(ln).strip()
+        if not t or t.startswith(">"):
+            continue
+        if is_sign_text(t) or is_sig_noise_line(t) or Q_FIELD_RE.match(t):
+            continue
+        if re.match(r"^\s*(?:-{2,}|_{2,}|={2,})\s*$", t):
+            continue
+        if re.match(r"^(?:안녕하십니까|안녕하세요|수고하십니다|수고\s*많으십니다|반갑습니다)", t):
+            continue
+        if re.fullmatch(r"[A-Za-z가-힣 ,.]{1,24},", t):          # `Seong Gyu,` 같은 호칭 인사
+            continue
+        cands.append(t)
+    if not cands:
+        return ""
+    for t in cands:                                            # 짧은 인사·이름 줄은 건너뛰고 첫 알맹이 줄
+        if len(t) >= 12:
+            return t
+    return cands[0]
+
+
+def _q_entry(head: dict, body_lines: list[str]) -> dict | None:
+    frm = _q_from(head.get("from") or "")
+    date = _q_date(head.get("date") or "")
+    subject = re.sub(r"^\s*(?:re|fw|fwd|답장|전달)\s*[:：]\s*", "", _clean(head.get("subject") or ""),
+                     flags=re.I).strip()
+    gist_body = _q_body_line(body_lines)
+    gist = " · ".join(x for x in (_clip(subject, 70), _clip(gist_body, 90)) if x)
+    if not (frm or date or subject):
+        return None
+    return {"date": date, "from": frm or "이전 메일", "gist": gist or "(내용 없음)"}
+
+
+def quoted_thread_entries(body: str) -> list[dict]:
+    """본문 아래 인용 블록(`From:`+`Sent:`+`Subject:` / `보낸사람:`…) → 시간순 스레드 줄."""
+    text = str(body or "")
+    if not text:
+        return []
+    entries: list[dict] = []
+    cur: dict | None = None
+    body_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal cur, body_lines
+        if cur is not None:
+            entry = _q_entry(cur, body_lines)
+            if entry:
+                entries.append(entry)
+        cur, body_lines = None, []
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if Q_SEP_RE.match(line) or THREAD_SEP_ONLY_RE.match(line):
+            flush()
+            cur = {"from": "", "date": "", "subject": ""}
+            continue
+        field, val = quoted_field(line)
+        if field:
+            if field == "from" and cur is not None and cur.get("from"):
+                flush()                                  # 구분선 없이 다음 메일이 시작된 경우
+            if cur is None:
+                if field != "from":
+                    continue                             # 머리표 없이 날짜만 있는 줄은 인용 시작으로 보지 않는다
+                cur = {"from": "", "date": "", "subject": ""}
+            if field in ("to", "cc"):
+                continue                                 # 수신·참조는 히스토리 줄에 쓰지 않는다
+            cur[field] = val
+            continue
+        if cur is not None and len(body_lines) < 8:
+            body_lines.append(line)
+    flush()
+    entries.sort(key=lambda e: str(e.get("date") or ""))
+    return entries
+
+
+def merge_quoted_thread(thread: list, body: str) -> list:
+    """기존 스레드 + 본문 인용 블록 — 같은 날짜·발신자는 이미 있는 줄로 보고 건너뛴다."""
+    entries = quoted_thread_entries(body)
+    if not entries:
+        return list(thread or [])
+    have: set[tuple[str, str]] = set()
+    for t in thread or []:
+        if not isinstance(t, dict):
+            continue
+        have.add((str(t.get("date") or "")[:10], _clip(_clean(t.get("from") or ""), 12)))
+    out = list(thread or [])
+    for e in entries:
+        key = (str(e.get("date") or "")[:10], _clip(_clean(e.get("from") or ""), 12))
+        if key in have:
+            continue
+        have.add(key)
+        out.append(e)
+    return dedup_thread(out)
+
+
+def enrich_threads_from_body(items: list[dict]) -> int:
+    """이미 저장된 항목도 본문 인용 블록을 히스토리에 채운다(새 메일이 없어도 1회 정리)."""
+    fixed = 0
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        body = str(it.get("bodyText") or "")
+        if not body:
+            continue
+        thr = it.get("thread") if isinstance(it.get("thread"), list) else []
+        if len(thr) >= 2 and not quoted_thread_entries(body):
+            continue
+        merged = merge_quoted_thread(thr, body)
+        if len(merged) > len(thr) or (thr and merged != thr):
+            if merged != thr:
+                it["thread"] = merged
+                fixed += 1
+                last = max([str(m.get("date") or "") for m in merged] + [str(it.get("receivedAt") or "")])[:16]
+                if last:
+                    it["lastAt"] = last
+    return fixed
+
+
+# ══════════════════════════════════════════════════════════════ 첨부파일 핵심 내용 (v1.2.21)
+#  본문이 "첨부 파일 참조 바랍니다" 뿐이면 AI 가 아무것도 모른 채 분석한다.
+#  3MB 이하 .xlsx/.xls/.csv/.pdf/.docx/.txt 만 메모리에서 열어 핵심 텍스트를 뽑고,
+#  [첨부파일 핵심 요약] 으로 분석 프롬프트에 함께 보낸다. 실패·대용량은 조용히 건너뛴다.
+ATT_TEXT_MAX = 3 * 1024 * 1024          # 이 크기까지만 연다(바이트)
+ATT_PROMPT_CHARS = 1500                 # 프롬프트에 넣는 최대 글자
+ATT_STORE_CHARS = 1200                  # 보드에 저장하는 최대 글자(item 크기 보호)
+ATT_TEXT_EXTS = (".xlsx", ".xlsm", ".xls", ".csv", ".pdf", ".docx", ".txt")
+
+
+def attachment_supported(name: str) -> bool:
+    """내용을 열어 볼 수 있는 첨부인가(.xlsx .xls .csv .pdf .docx .txt)."""
+    return str(name or "").strip().lower().endswith(ATT_TEXT_EXTS)
+
+
+def _decode_text(blob: bytes) -> str:
+    for enc in ("utf-8-sig", "cp949", "euc-kr", "latin-1"):
+        try:
+            return blob.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return blob.decode("utf-8", "replace")
+
+
+def _norm_att_text(text: str, limit: int = ATT_PROMPT_CHARS) -> str:
+    rows = [re.sub(r"[ \t]{2,}", " ", ln).strip() for ln in str(text or "").replace("\r", "").splitlines()]
+    rows = [r for r in rows if r]
+    out: list[str] = []
+    size = 0
+    for r in rows:
+        if size + len(r) + 1 > limit:
+            break
+        out.append(r)
+        size += len(r) + 1
+    return "\n".join(out)
+
+
+def _xlsx_rows_ok(cells: list[str]) -> bool:
+    return any(c.strip() for c in cells)
+
+
+def _xlsx_text_openpyxl(blob: bytes) -> str:
+    try:
+        from openpyxl import load_workbook          # 외부 라이브러리가 있으면 이쪽이 정확하다
+    except Exception:  # noqa: BLE001
+        return ""
+    try:
+        wb = load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001
+        return ""
+    out: list[str] = []
+    try:
+        for idx, ws in enumerate(wb.worksheets[:2]):
+            rows: list[list[str]] = []
+            for row in ws.iter_rows(values_only=True, max_row=26):
+                cells = [("" if v is None else str(v)).strip() for v in (row or ())]
+                if _xlsx_rows_ok(cells):
+                    rows.append(cells)
+            if not rows:
+                continue
+            out.append(f"[시트] {ws.title} · {len(rows)}행")
+            out += [" | ".join(c for c in r if c) for r in rows[:25]]
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        try:
+            wb.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return _norm_att_text("\n".join(out))
+
+
+def _xlsx_text_stdlib(blob: bytes) -> str:
+    """openpyxl 이 없어도 zipfile + xml.etree 로 .xlsx 를 읽는다(표준 라이브러리 폴백)."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    try:
+        z = zipfile.ZipFile(io.BytesIO(blob))
+    except Exception:  # noqa: BLE001
+        return ""
+    shared: list[str] = []
+    try:
+        if "xl/sharedStrings.xml" in z.namelist():
+            root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            for si in root.iter(ns + "si"):
+                shared.append("".join((t.text or "") for t in si.iter(ns + "t")))
+    except Exception:  # noqa: BLE001
+        shared = []
+    names: list[str] = []
+    try:
+        wb = ET.fromstring(z.read("xl/workbook.xml"))
+        names = [str(s.get("name") or "") for s in wb.iter(ns + "sheet")]
+    except Exception:  # noqa: BLE001
+        names = []
+    sheets = sorted(n for n in z.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", n))
+    out: list[str] = []
+    for idx, path in enumerate(sheets[:2]):
+        try:
+            root = ET.fromstring(z.read(path))
+        except Exception:  # noqa: BLE001
+            continue
+        rows: list[list[str]] = []
+        for r in root.iter(ns + "row"):
+            cells: list[str] = []
+            for c in r.iter(ns + "c"):
+                t = c.get("t")
+                v = c.find(ns + "v")
+                val = ""
+                if t == "s" and v is not None and (v.text or "").strip().isdigit():
+                    i = int(v.text.strip())
+                    val = shared[i] if i < len(shared) else ""
+                elif t == "inlineStr":
+                    val = "".join((x.text or "") for x in c.iter(ns + "t"))
+                elif v is not None:
+                    val = v.text or ""
+                cells.append(str(val).strip())
+            if _xlsx_rows_ok(cells):
+                rows.append(cells)
+        if not rows:
+            continue
+        title = names[idx] if idx < len(names) else f"시트{idx + 1}"
+        out.append(f"[시트] {title} · {len(rows)}행")
+        out += [" | ".join(c for c in r if c) for r in rows[:25]]
+    try:
+        z.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return _norm_att_text("\n".join(out))
+
+
+def _xls_text(blob: bytes) -> str:
+    try:
+        import xlrd                                 # 옛 .xls 는 xlrd 가 있을 때만
+    except Exception:  # noqa: BLE001
+        return ""
+    try:
+        book = xlrd.open_workbook(file_contents=blob)
+    except Exception:  # noqa: BLE001
+        return ""
+    out: list[str] = []
+    for sh in book.sheets()[:2]:
+        rows = []
+        for r in range(min(sh.nrows, 25)):
+            cells = [str(sh.cell_value(r, c)).strip() for c in range(sh.ncols)]
+            if _xlsx_rows_ok(cells):
+                rows.append(" | ".join(c for c in cells if c))
+        if rows:
+            out.append(f"[시트] {sh.name} · {sh.nrows}행")
+            out += rows
+    return _norm_att_text("\n".join(out))
+
+
+def _docx_text(blob: bytes) -> str:
+    """.docx 는 zipfile + 정규식으로 문단 텍스트만 뽑는다(외부 라이브러리 불필요)."""
+    import html as _html
+    import zipfile
+    try:
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        xml = z.read("word/document.xml").decode("utf-8", "ignore")
+        z.close()
+    except Exception:  # noqa: BLE001
+        return ""
+    out: list[str] = []
+    for para in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)[:80]:
+        text = "".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", para, re.S))
+        text = _html.unescape(text).strip()
+        if text:
+            out.append(text)
+    return _norm_att_text("\n".join(out))
+
+
+def _pdf_text(blob: bytes) -> str:
+    """상위 2페이지 1,500자 — pypdf → PyMuPDF(fitz) 순서로 시도."""
+    text = ""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(blob))
+        text = "\n".join((p.extract_text() or "") for p in reader.pages[:2])
+    except Exception:  # noqa: BLE001
+        text = ""
+    if not text.strip():
+        try:
+            import fitz                            # PyMuPDF
+            doc = fitz.open(stream=blob, filetype="pdf")
+            text = "\n".join(doc[i].get_text() for i in range(min(2, doc.page_count)))
+            doc.close()
+        except Exception:  # noqa: BLE001
+            text = ""
+    return _norm_att_text(text)
+
+
+def extract_attachment_text(name: str, blob: bytes) -> str:
+    """첨부 1건 → 핵심 텍스트. 지원하지 않거나 읽지 못하면 빈 문자열(조용히 건너뜀)."""
+    if not blob or not attachment_supported(name):
+        return ""
+    ext = str(name).strip().lower().rsplit(".", 1)[-1]
+    try:
+        if ext in ("xlsx", "xlsm"):
+            return _xlsx_text_openpyxl(blob) or _xlsx_text_stdlib(blob)
+        if ext == "xls":
+            return _xls_text(blob) or _xlsx_text_stdlib(blob)
+        if ext == "docx":
+            return _docx_text(blob)
+        if ext == "pdf":
+            return _pdf_text(blob)
+        if ext in ("csv", "txt"):
+            return _norm_att_text(_decode_text(blob))
+    except Exception:  # noqa: BLE001 - 첨부 하나가 분석을 막지 않는다
+        return ""
+    return ""
+
+
+def attachment_summary_text(fetcher, mail: dict, *, max_files: int = 2,
+                            stats: dict | None = None) -> str:
+    """메일 첨부(3MB 이하) 핵심 텍스트 → AI 프롬프트용 `[첨부파일 핵심 요약]` 본문.
+
+    fetcher 는 웹메일 로그인 세션을 쥔 Nmail(fetch_bytes 사용) — 없으면 아무것도 하지 않는다.
+    """
+    if fetcher is None:
+        return ""
+    parts: list[str] = []
+    for a in (mail.get("attachments") or [])[:8]:
+        if len(parts) >= max_files:
+            break
+        if not isinstance(a, dict):
+            continue
+        name = str(a.get("name") or "").strip()
+        url = str(a.get("url") or "").strip()
+        if not name or not url or not attachment_supported(name):
+            continue
+        try:
+            blob = fetcher.fetch_bytes(url, cap=ATT_TEXT_MAX)
+        except TypeError:
+            try:
+                blob = fetcher.fetch_bytes(url)
+            except Exception:  # noqa: BLE001
+                blob = None
+        except Exception:  # noqa: BLE001
+            blob = None
+        if not blob:
+            continue
+        text = extract_attachment_text(name, blob)
+        if not text.strip():
+            continue
+        parts.append(f"· {name} — {text}")
+    return "\n".join(parts)
+
+
+def _att_one_line(mail: dict) -> str:
+    """첨부 요약을 화면 한 줄로 — `파일명 · 시트 4행 · 머리글`."""
+    txt = str(mail.get("attachmentText") or "").strip()
+    txt = re.sub(r"^·\s*[^\n—]{0,90}—\s*", "", txt)
+    lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+    sheet = ""
+    if lines and lines[0].startswith("[시트]"):
+        sheet = re.sub(r"^\[시트\]\s*", "", lines[0]).strip()
+        lines = lines[1:]
+    first = lines[0] if lines else ""
+    name = next((str(a.get("name") or "") for a in mail.get("attachments") or []
+                 if isinstance(a, dict) and attachment_supported(a.get("name") or "")), "")
+    parts = [p for p in (name, _clip(sheet, 30), first) if p]
+    return _clip(" · ".join(parts), 90)
+
+
 def skip_analysis(mail: dict, reason: str = "simple_share") -> dict:
-    """⚪ 단순 공유 — AI 를 전혀 부르지 않는다(Zero-Token). 나중에 화면에서 다시 부를 수 있게 입력만 남긴다."""
+    """⚪ 기록 보관 — AI 를 전혀 부르지 않는다(Zero-Token). 나중에 화면에서 다시 부를 수 있게 입력만 남긴다."""
     body = clean_body(mail.get("bodyText") or "")
     title = mail.get("subject") or mail.get("title") or ""
     ref = mail.get("date") or mail.get("receivedAt") or ""
@@ -2356,7 +2897,7 @@ def skip_analysis(mail: dict, reason: str = "simple_share") -> dict:
         "replyDrafts": {},
         "aiSkipped": True,
         "aiSkipReason": reason,
-        "mainDept": "확인 필요(단순 공유)",
+        "mainDept": "확인 필요(기록 보관)",
         "deptBasis": "출하리스트·납입요청 등 현장 일상 공유로 분류(수신·참조 위치만)",
         "ourDeptAction": _share_actions(mail)[0],
         "myAction": _share_actions(mail)[1],
@@ -2414,6 +2955,9 @@ def analysis_input_text(mail: dict, kind: str = "받은편지함", *, contacts: 
     ]
     if mail.get("attachments"):
         lines.append("[첨부] " + ", ".join(f"{a.get('name')}({a.get('size')})" for a in mail["attachments"]))
+    if mail.get("attachmentText"):
+        lines += ["", "[첨부파일 핵심 요약] — 첨부를 열어 뽑은 실제 값. 메일 분석·결론·할 일에 반드시 반영한다",
+                  str(mail["attachmentText"])[:ATT_PROMPT_CHARS]]
     lines += ["", org_context(mail, contacts)]
     body = analysis_body(mail)
     if cache and cache.get("timeline"):
@@ -2480,10 +3024,11 @@ def _run_ai(gem, mail: dict, kind: str, contacts: dict | None, cache: dict | Non
 
 def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict | None = None,
                  *, thread_cache: dict | None = None, stats: dict | None = None,
-                 brief: bool = False, force_deep: bool = False) -> dict:
-    """메일 1통 분석 — ① 단순 공유는 AI 생략 ② 타 부서 참조는 경량 ③ 나머지는 3단 정밀 분석.
+                 brief: bool = False, force_deep: bool = False, fetcher=None) -> dict:
+    """메일 1통 분석 — ⚪ 기록 보관만 AI 생략, 🔴 즉시 확인·🟡 흐름 참고는 3단 정밀 분석 (v1.2.21).
 
     정밀 분석은 스레드 캐시가 있으면 '누적 타임라인 + 새 메일 1통'만 보낸다(증분).
+    fetcher(웹메일 로그인 세션)를 주면 첨부(.xlsx/.pdf/.docx…) 핵심 내용을 뽑아 프롬프트에 함께 보낸다.
     """
     contacts = contacts or {}
     inbox = str(kind or "").startswith("받은")
@@ -2491,11 +3036,17 @@ def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict 
         priority = int(prefilter(mail, contacts).get("priority") or 2)
         mentioned = text_mentions_us(mail)
         to_me = _is_to(mail)          # 내가 직접 수신(To)인가 — 팀원이 받은 것과 구분한다
-        # ⚪ 단순 공유 — AI 0회. 단, 내가 수신(To)이거나 본문·제목에 지목된 건은 예외로 정상 분석한다(v1.2.12).
+        # ⚪ 기록 보관 — AI 0회. 단, 내가 수신(To)이거나 본문·제목에 지목된 건은 예외로 정상 분석한다(v1.2.12).
         if priority == 3 and not mentioned and not to_me:
             return skip_analysis(mail, "simple_share")
-        if not mentioned and not to_includes_us(mail, contacts):
-            return light_analysis(mail, contacts)
+        # v1.2.21 — 🟡 흐름 참고(참조 CC·타 부서 주담당)도 경량 1줄 대신 처음부터 3단 정밀 분석.
+        #   타 부서 주담당이면 분석 안에서 [직접 조치 없음 · 타 부서(OOO) 주담당 · 참조 흐름 파악 필요]로 판정한다.
+        #   (v1.2.11 의 `if not mentioned and not to_includes_us(...): return light_analysis(...)` 분기를 걷어냈다)
+    # v1.2.21 — 첨부 내용(3MB 이하 .xlsx/.pdf/.docx/.csv/.txt)을 열어 프롬프트에 함께 보낸다
+    if fetcher is not None and not mail.get("attachmentText"):
+        att = attachment_summary_text(fetcher, mail, stats=stats)
+        if att:
+            mail["attachmentText"] = att
     cache = thread_cache_get(thread_cache, mail)
     res = _run_ai(gem, mail, kind, contacts, cache, stats, brief)
     if inbox and not brief:
@@ -2618,7 +3169,7 @@ def classify(item: dict) -> None:
     bulk_list = any(k in title for k in P3_TITLE_KEYWORDS)
     category = item.get("category") or ""
 
-    # 보호 대상 — 내가 수신(To)이거나 제목·본문에 내 이름이 지목됨. ‘단순 공유’ 규칙이 걸려도
+    # 보호 대상 — 내가 수신(To)이거나 제목·본문에 내 이름이 지목됨. ‘기록 보관’ 규칙이 걸려도
     # 이 메일은 흐름 참고 아래로 내려가지 않는다(화면 isProtectedItem 과 같은 기준).
     protected = bool(to_me or item["mentionedUser"])
     labels = {1: P1_LABEL, 2: P2_LABEL, 3: P3_LABEL}
@@ -2760,12 +3311,18 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
   직접 요청한 문장(예: "납입1팀 확인 부탁드립니다", "김성규 과장님 회신 부탁드립니다")이 있을 때만 직접 회신으로 본다.
   그 외에는 mainDept 를 실제 요청받은 담당자/부서로 쓰고 `[직접 조치 없음 · 타 부서(OOO) 주담당 · 참조 흐름 파악 필요]`,
   replyStatus 는 no_reply_needed 로 결론낸다.
+- **발신자가 나 또는 우리 부서(팀) 팀원이면 우리가 이미 보낸 메일이다** (예: 납입1팀 강한 사원 → 경영지원팀 정하건).
+  발신자에게 다시 회신하라는 결론을 절대 쓰지 않는다. `RE:` 답장이거나 본문에 `해당자 없습니다`·`송부드립니다`·
+  `회신드립니다`·`전달드립니다`·`확인 완료` 같은 회신·송부 완료 표현이 있으면 ourDeptAction 을
+  `[회신·송부 완료 · 우리 부서(발신자) → 수신자(OOO)에게 처리 완료]`, myAction 을 `[추가 회신 없음 · 처리 이력 확인용]`
+  으로 쓰고 replyStatus 는 no_reply_needed, actionItems 는 빈 배열로 둔다. 본문의 핵심 결론(예: "해당자 없음",
+  "자료 송부 완료")은 headline·timeline 에 원문 표현 그대로 남긴다.
 - [사내 조직 컨텍스트] 의 부서 매핑을 적극적으로 쓴다. "나"가 속한 부서가 우리 부서다.
 
 [ourDeptAction / myAction — 3) 결론]
 - **금지 문구**: "본문 요청 내용 확인 후 회신", "본문 확인 후 회신", "본문 확인 후 조치", "본문 요청 확인",
   "내용 확인 후 회신" 같은 두루뭉술한 상투어. **맡은 일이 없다는 뜻의 짧은 마무리도 절대 쓰지 않는다.**
-  할 일이 없으면 왜 없는지(타 부서 주담당·단순 공유)와 무엇을 계속 볼지(참조 흐름·모니터링)를 적는다.
+  할 일이 없으면 왜 없는지(타 부서 주담당·기록 보관)와 무엇을 계속 볼지(참조 흐름·모니터링)를 적는다.
 - ourDeptAction: [구체적 행위 + 대상/품번·기준 + 회신 대상자·형태] 가 드러나게 한 줄로 쓴다.
   · 직접 할 일이 있으면 `[직접 회신 필요] 11/25(수) 07시 기준 2품번(13524683·13540045) 재고조사 결과 정리 → 요청자(유광승 과장)에게 회신`
     처럼 날짜·품번·수량·회신 대상을 원문 값으로 넣는다.
@@ -2789,14 +3346,14 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
 
 [actionItems]
 - 김성규 과장이 실제로 해야 하는 일만 0~4개. 없으면 빈 배열.
-- 보고/RE/FW 성격이거나 참조(CC)로 받은 단순 공유면 비운다.
+- 보고/RE/FW 성격이거나 참조(CC)로 받은 기록 보관면 비운다.
 
 [dueDate / deadline]
 - 본문에 명시된 요청 기한을 YYYY-MM-DD 로. 없으면 dueDate 는 null, deadline 은 "별도 회신 기한 없음" 같은 한 줄.
 
 [replyStatus]
 - needs_reply: 김성규 과장이 답을 보내야 하는 요청·질의·확인 건.
-- no_reply_needed: 단순 공유·참고·이미 종결된 건.
+- no_reply_needed: 기록 보관·참고·이미 종결된 건.
 - replied: 본문에 이미 회신한 흔적이 뚜렷한 건.
 
 [replyDrafts]
@@ -3576,6 +4133,16 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
     }
     if mail.get("attachments"):
         item["attachments"] = mail["attachments"]
+    # v1.2.21 — 본문 아래 인용 스레드(From:/Sent:/보낸사람:)를 히스토리에 합친다
+    merged_thread = merge_quoted_thread(item.get("thread") or [], mail.get("bodyText") or "")
+    if merged_thread:
+        item["thread"] = merged_thread
+    # v1.2.21 — 첨부에서 뽑은 핵심 내용: 분석 재실행용 원문(짧게) + 화면 한 줄 요약
+    if mail.get("attachmentText"):
+        item["attachmentText"] = str(mail["attachmentText"])[:ATT_STORE_CHARS]
+        one = _att_one_line(mail)
+        if one:
+            item["attachmentSummary"] = one
     if analysis.get("tags"):
         item["tags"] = analysis["tags"]
     # 3단 분석 재료·AI 생략 표시 (v1.2.11)
@@ -3711,7 +4278,7 @@ def merge_into_thread(item: dict, new_item: dict) -> None:
         item.pop("aiSkipped", None)
         item.pop("aiSkipReason", None)
     elif new_item.get("aiSkipped"):
-        # 이번 회신이 단순 공유/타 부서 참조로 건너뛴 것이면 그 표시도 함께 옮긴다(화면의 [✨ AI 요약] 버튼)
+        # 이번 회신이 기록 보관/타 부서 참조로 건너뛴 것이면 그 표시도 함께 옮긴다(화면의 [✨ AI 요약] 버튼)
         item["aiSkipped"] = True
         item["aiSkipReason"] = new_item.get("aiSkipReason") or "simple_share"
     if new_item.get("actionItems"):
@@ -3873,8 +4440,12 @@ def sync(args: argparse.Namespace) -> dict:
     if to_repaired:
         report["toRepaired"] = to_repaired
     # v1.2.18 — 새 메일이 없어도 ① 쌓인 히스토리 중복 ② 웹메일 메뉴가 첨부로 붙은 기록을 정리한다
-    hist_merged = dedup_all_threads(items)
+    # v1.2.21 — 예전 수집분도 본문 인용 스레드를 히스토리에 채운다(새 메일이 없어도 1회)
+    hist_enriched = enrich_threads_from_body(items)
+    hist_merged = dedup_all_threads(items) + hist_enriched
     att_cleaned = clean_attachments(items)
+    if hist_enriched:
+        report["historyEnriched"] = hist_enriched
     if hist_merged:
         report["historyMerged"] = hist_merged
     if att_cleaned:
@@ -3889,8 +4460,8 @@ def sync(args: argparse.Namespace) -> dict:
     thread_cache = data.setdefault("thread_cache", {})
 
     def analyze(mail: dict, kind: str) -> dict:
-        # v1.2.11 — 단순 공유는 AI 생략, 타 부서 참조는 경량, 나머지는 3단 정밀 분석(스레드 증분)
-        return analyze_mail(gem, mail, kind, contacts, thread_cache=thread_cache, stats=report)
+        # v1.2.21 — 기록 보관만 AI 생략, 나머지는 3단 정밀 분석(스레드 증분) · 첨부 핵심 내용 포함
+        return analyze_mail(gem, mail, kind, contacts, thread_cache=thread_cache, stats=report, fetcher=nm)
 
     added = 0
     for row in inbox:

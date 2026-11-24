@@ -511,7 +511,7 @@
   /* 🆕 새로 들어온 메일 — 제목 앞 포인트 인디고 NEW 필 (열어보거나 ✅ 확인하면 사라진다) */
   .row .newpill{flex:none; display:inline-flex; align-items:center; height:15px; padding:0 6px; border-radius:999px;
     background:var(--brand); color:#fff; font-size:8.8px; font-weight:700; letter-spacing:.05em; line-height:1}
-  /* 🟡 흐름 참고 · ⚪ 단순 공유 — 전체 선택 · 일괄 ✅ 확인 바 */
+  /* 🟡 흐름 참고 · ⚪ 기록 보관 — 전체 선택 · 일괄 ✅ 확인 바 */
   .bulkbar{display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; margin:0 0 8px; padding:8px 10px;
     background:#fff; border:1px solid var(--line); border-radius:9px}
   .bulk-all{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; color:var(--ink-2); cursor:pointer; white-space:nowrap}
@@ -671,6 +671,8 @@
   .dr-head{display:flex; align-items:flex-start; gap:8px; padding:14px 16px 8px; border-bottom:1px solid var(--line); background:#fff; flex:none}
   .dr-head .badges{display:flex; flex-wrap:wrap; gap:4px; margin-bottom:7px}
   .dr-head h2{font-size:14.5px; margin:0; letter-spacing:-.015em; line-height:1.45; flex:1; min-width:0; font-weight:600}
+  /* v1.2.21 — ‘웹메일 원본 ↗’ 을 제목 줄(📌 고정 · ✕ 옆)로 올리고, 하단 중복 액션 바는 없앴다 */
+  .dr-head .dr-origin{flex:none; align-self:center; white-space:nowrap}
   .dr-close{flex:none; width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:13px;color:var(--ink-2)}
   .dr-close:hover{background:#fafafa; border-color:#d4d4d8}
   .dr-body{overflow-y:auto; padding:0 0 20px; flex:1; min-height:0}
@@ -884,6 +886,10 @@
     .dr-foot .cal-date input{width:96px}
     .dr-foot .mini{font-size:10.8px; padding:4px 6px}
   }
+  /* ✅ 완료한 수기 일정 — 카드·배지를 차분하게 (v1.2.21 #9450) */
+  .side-card.cus.is-done{opacity:.66}
+  .side-card.cus.is-done .sc-t{text-decoration:line-through; text-decoration-color:var(--ink-3)}
+  .cus-acts .ca.done.on{background:var(--green-weak); border-color:#cbeadd; color:var(--green)}
   /* ---------- ⚙️ 분류 규칙 설정 ---------- */
   #rulesModal{position:fixed; inset:0; z-index:72; display:none; align-items:center; justify-content:center; padding:16px}
   #rulesModal.on{display:flex}
@@ -1590,7 +1596,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.20</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.21</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1658,7 +1664,7 @@
       <button type="button" class="newclear" id="newClear" title="지금 보는 탭의 NEW 표시를 모두 지웁니다 (메일은 그대로 남습니다)">🆕 NEW 지우기</button>
       <label class="tog" id="doneTog"><input type="checkbox" id="doneChk"> 완료 포함</label>
       <label class="tog" id="replyTog"><input type="checkbox" id="replyChk"> 회신 필요만 보기</label>
-      <div class="search"><span>🔍</span><input id="q" type="search" placeholder="제목 · 발신자 · 품번 · 내용 검색 (단순 공유 · 이전 기록도 검색)"></div>
+      <div class="search"><span>🔍</span><input id="q" type="search" placeholder="제목 · 발신자 · 품번 · 내용 검색 (기록 보관 · 이전 기록도 검색)"></div>
       <a class="tog" id="webmailSearch" href="https://mail.chunil.co.kr/mail_list.php?mb_id=inbox&page_size=100&sdp=A&s_date=365" target="_blank" rel="noopener" title="회사 웹메일에서 지난 1년 받은편지함을 직접 검색합니다">🔎 웹메일 1년 검색</a>
       <select class="sort" id="sort">
         <option value="recent" selected>최신 수신순</option>
@@ -1826,7 +1832,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.20").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.21").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -2347,7 +2353,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     RB_KW = RULES.keywords.map((k) => ({ re: k.text.toLowerCase(), priority: k.priority, text: k.text }));
   }
   /* 이 메일이 ‘보호’ 대상인가 (v1.2.12) — 내가 수신(To)이거나 제목·본문에 내 이름이 지목됨.
-     ⚪ 단순 공유 규칙이 걸려 있어도 이런 메일은 흐름 참고 아래로 내려가지 않는다(예외 안전장치). */
+     ⚪ 기록 보관 규칙이 걸려 있어도 이런 메일은 흐름 참고 아래로 내려가지 않는다(예외 안전장치). */
   function isProtectedItem(it) {
     if (!it) return false;
     const role = String(it.recipientRole || "").trim().toLowerCase();
@@ -2380,7 +2386,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       const t = String(it.title || "").toLowerCase();
       for (let i = 0; i < RB_KW.length; i++) {
         if (t.indexOf(RB_KW[i].re) < 0) continue;
-        if (prot && RB_KW[i].priority === 3) continue;      /* 보호 메일은 ‘단순 공유’로 내리지 않는다 */
+        if (prot && RB_KW[i].priority === 3) continue;      /* 보호 메일은 ‘기록 보관’로 내리지 않는다 */
         res = { p: RB_KW[i].priority, kind: "keyword", label: RB_KW[i].text };
         break;
       }
@@ -2462,9 +2468,20 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
 
   function doneCount(it) { const st = stateOf(it); return (it.actionItems || []).filter((_, i) => st.checks[i]).length; }
-  function dueOf(it) { return it.dueDate || (it.deadlineAt ? String(it.deadlineAt).slice(0, 10) : null); }
+  /* v1.2.21 — 📅 내 캘린더에 등록·옮긴 날짜(calDate)가 있으면 메일에 저장된 dueDate·deadlineAt 보다 먼저 쓴다.
+     (12/01 로 옮겨 둔 ‘11월 근태마감’ 이 본문에서 잘못 잡힌 11/25 D-1 로 뜨던 문제 — 스크린샷 1000025160·61) */
+  function dueOf(it) {
+    const cd = calDate(it);
+    if (cd) return cd;
+    return it.dueDate || (it.deadlineAt ? String(it.deadlineAt).slice(0, 10) : null);
+  }
   const isTodayDue = (it) => dueOf(it) === todayY();
-  function deadlineMs(it) { if (!it.deadlineAt) return null; const t = Date.parse(it.deadlineAt); return isNaN(t) ? null : t; }
+  function deadlineMs(it) {
+    if (calDate(it)) return null;      /* v1.2.21 — 캘린더에 지정한 날짜가 기한을 대신한다(시각 판정은 하지 않는다) */
+    if (!it.deadlineAt) return null;
+    const t = Date.parse(it.deadlineAt);
+    return isNaN(t) ? null : t;
+  }
   function replyOf(it) { const st = stateOf(it); return st.reply || it.replyStatus || "needs_reply"; }
   /* 회신 여부 저장 → KPI·목록(배지·필터 건수) 즉시 갱신, 드로어가 열려 있으면 그 배지도 갱신 */
   function setReply(id, k, prev) {
@@ -2505,7 +2522,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
     toast(done ? "✅ 확인 — 기본 목록에서 치었습니다 (검색·‘완료 포함’에서 다시 볼 수 있음)" : "↩ 완료를 취소해 목록으로 돌렸습니다");
   }
-  /* 🔴 즉시 확인 · 🟡 흐름 참고 · ⚪ 단순 공유 · 📌 고정 · ⏳ 미회신 — 보이는 항목을 한꺼번에 선택해 일괄 처리
+  /* 🔴 즉시 확인 · 🟡 흐름 참고 · ⚪ 기록 보관 · 📌 고정 · ⏳ 미회신 — 보이는 항목을 한꺼번에 선택해 일괄 처리
      (행의 ✅ 확인 / 고정 / 회신 받음과 같은 localStorage 상태를 쓴다) */
   const bulkSel = { p1: new Set(), p2: new Set(), p3: new Set(), pin: new Set(), fu: new Set() };
   const BULK_TABS = { p1: 1, p2: 1, p3: 1, pin: 1, fu: 1 };
@@ -2598,9 +2615,125 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     });
     return out;
   }
+  /* 🕒 본문 인용 스레드 (v1.2.21)
+     메일함엔 1통만 들어와도 본문 아래 `-----Original Message-----` / `From:` · `Sent:` /
+     `보낸사람:` · `보낸 날짜:` 인용 블록이 붙어 있으면 히스토리로 보여 준다.
+     (스크린샷 1000025154 — m-5418556 이 ‘이 메일이 스레드의 첫 메일입니다’로 끝나던 문제) */
+  const QT_KEYS = { from: "from", "보낸사람": "from", sent: "date", date: "date", "보낸날짜": "date",
+    "보낸때": "date", "일시": "date", subject: "subject", "제목": "subject",
+    to: "to", "받는사람": "to", cc: "cc", "참조": "cc" };
+  const QT_SEP = /^\s*[>\s]*(?:-{2,}\s*)?(?:original\s*message|원본\s*메일|메일\s*원본|forwarded\s*message|전달된\s*메일|전달\s*메일)(?:\s*-{2,})?\s*$/i;
+  const QT_FIELD = /^\s*(?:>\s*)?([A-Za-z가-힣][A-Za-z가-힣 ]{0,9}?)\s*[:：]\s*(.*)$/;
+  const QT_MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  function qtPad(n) { return (n < 10 ? "0" : "") + n; }
+  function qtClock(text) {
+    const s = String(text || "");
+    const m = s.match(/(?:^|[^\d])(\d{1,2})\s*[:시]\s*(\d{2})?(?!\d)/);
+    if (!m) return "";
+    let hh = Number(m[1]), mm = Number(m[2] || 0);
+    const around = s.slice(0, (m.index || 0) + m[0].length + 3);
+    if (hh < 12 && (/오후/.test(around) || /\bpm\b/i.test(s))) hh += 12;
+    if (hh === 12 && (/오전/.test(around) || /\bam\b/i.test(s))) hh = 0;
+    return qtPad(hh) + ":" + qtPad(mm);
+  }
+  function qtDate(raw) {
+    const s = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    let y = 0, mo = 0, d = 0, rest = s, m = null;
+    m = s.match(/(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/);
+    if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; rest = s.slice(m.index + m[0].length, m.index + m[0].length + 20); }
+    if (!y) {
+      m = s.match(/([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(20\d{2})/);
+      if (m && QT_MONTHS[m[1].slice(0, 3).toLowerCase()]) {
+        y = +m[3]; mo = QT_MONTHS[m[1].slice(0, 3).toLowerCase()]; d = +m[2];
+        rest = s.slice(m.index + m[0].length, m.index + m[0].length + 20);
+      }
+    }
+    if (!y) {
+      m = s.match(/(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(20\d{2})/);
+      if (m && QT_MONTHS[m[2].slice(0, 3).toLowerCase()]) {
+        y = +m[3]; mo = QT_MONTHS[m[2].slice(0, 3).toLowerCase()]; d = +m[1];
+        rest = s.slice(m.index + m[0].length, m.index + m[0].length + 20);
+      }
+    }
+    if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return s.slice(0, 24);
+    const clock = qtClock(rest || s);
+    return y + "-" + qtPad(mo) + "-" + qtPad(d) + (clock ? " " + clock : "");
+  }
+  function qtFrom(raw) {
+    const s = String(raw || "").replace(/\s+/g, " ").trim().replace(/;+$/, "");
+    if (!s) return "";
+    const em = s.match(/<([^<>\s]+@[^<>\s]+)>/);
+    const email = em ? em[1] : "";
+    let name = s.replace(/<[^>]*>/g, "").trim().replace(/^["']+|["']+$/g, "").trim();
+    if (!name && email) name = email.split("@")[0];
+    let org = "";
+    if (email) {
+      const dom = email.split("@").pop().toLowerCase();
+      const mine = String((meEmail() || "").split("@").pop() || "").toLowerCase();
+      if (dom === "gm.com") org = "GM";
+      else if (dom && dom !== mine) org = dom.split(".")[0].toUpperCase();
+    }
+    const label = name.slice(0, 20);
+    return label && org ? label + " (" + org + ")" : label;
+  }
+  function qtEntry(head, lines) {
+    const frm = qtFrom(head.from || ""), date = qtDate(head.date || "");
+    const subject = String(head.subject || "").replace(/^\s*(?:re|fw|fwd|답장|전달)\s*[:：]\s*/i, "").trim();
+    const cands = [];
+    (lines || []).forEach((ln) => {
+      const t = String(ln || "").trim();
+      if (!t || t.charAt(0) === ">" || QT_FIELD.test(t)) return;
+      if (/^(?:-{2,}|_{2,}|={2,})$/.test(t)) return;
+      if (/^(?:안녕하십니까|안녕하세요|수고하십니다|수고\s*많으십니다|반갑습니다)/.test(t)) return;
+      if (/^[A-Za-z가-힣 ,.]{1,24},$/.test(t)) return;
+      cands.push(t);
+    });
+    const bodyLine = cands.filter((t) => t.length >= 12)[0] || cands[0] || "";
+    const gist = [subject.slice(0, 70), bodyLine.slice(0, 90)].filter(Boolean).join(" · ");
+    if (!(frm || date || subject)) return null;
+    return { date: date, from: frm || "이전 메일", gist: gist || "(내용 없음)" };
+  }
+  function quoteThread(text) {
+    const src = String(text || "");
+    if (!src) return [];
+    const out = [];
+    let cur = null, body = [];
+    const flush = () => {
+      if (cur) { const e = qtEntry(cur, body); if (e) out.push(e); }
+      cur = null; body = [];
+    };
+    src.split(/\r?\n/).forEach((rawLine) => {
+      const line = rawLine.replace(/\s+$/, "");
+      if (QT_SEP.test(line)) { flush(); cur = { from: "", date: "", subject: "" }; return; }
+      const m = line.match(QT_FIELD);
+      let field = null, val = "";
+      if (m) {
+        field = QT_KEYS[m[1].replace(/\s+/g, "").toLowerCase()] || null;
+        val = (m[2] || "").trim();
+      }
+      if (field) {
+        if (field === "from" && cur && cur.from) flush();
+        if (!cur) { if (field !== "from") return; cur = { from: "", date: "", subject: "" }; }
+        if (field === "to" || field === "cc") return;
+        cur[field] = val;
+        return;
+      }
+      if (cur && body.length < 8) body.push(line);
+    });
+    flush();
+    out.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    return out;
+  }
   function threadOf(it) {
     const list = it.thread && it.thread.length ? it.thread : [{ date: it.receivedAt, from: it.sender, gist: it.title, link: it.mailLink }];
-    return dedupHistory(list);
+    const out = dedupHistory(list);
+    if (out.length >= 2) return out;
+    const quoted = quoteThread(it.bodyText || it.analysisBody || "");
+    if (!quoted.length) return out;
+    const day = (m) => String((m && m.date) || "").slice(0, 10) + "|" + String((m && m.from) || "").slice(0, 12);
+    const seen = new Set(out.map(day));
+    return dedupHistory(out.concat(quoted.filter((q) => !seen.has(day(q)))));
   }
 
   function human(ms) {
@@ -2616,7 +2749,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     const due = dueOf(it);
     const ms = deadlineMs(it);
     const now = Date.now();
-    const timeStr = it.deadline && /(\d{1,2}:\d{2})/.exec(it.deadline) ? RegExp.$1 : null;
+    /* v1.2.21 — 캘린더에 날짜를 지정했으면 메일 본문의 시각(09:00)을 배지에 붙이지 않는다 */
+    const timeStr = !calDate(it) && it.deadline && /(\d{1,2}:\d{2})/.exec(it.deadline) ? RegExp.$1 : null;
     if (ms !== null) {
       const left = ms - now;
       if (left <= 0) {
@@ -2712,6 +2846,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
        · [오늘 하루 보지 않기]를 누르면 오늘 날짜를 저장하고 닫는다. 헤더 ☀️ 브리핑 버튼으로는 언제든 열린다. */
   const BRIEF_SNOOZE_MS = 30 * 60 * 1000;
   const BRIEF_TODO_MAX = 4;    /* 🔥 오늘 해야 할 일 최대 줄 수 */
+  const BF_CUS_LATE = 14;      /* 📌 완료하지 않은 지난 수기 일정을 브리핑에 끌고 가는 기간(일) — v1.2.21 #9450 */
   const BRIEF_NIGHT_MAX = 4;   /* 🌙 밤새 미확인 최대 줄 수 */
   const BRIEF_LINE_MAX = 50;   /* 할 일·이유 한 줄 길이(글자) */
   let briefDismissAt = 0;      /* 이 화면에서 ‘나중에’로 닫은 시각 — 새로 열면 초기화된다 */
@@ -2856,7 +2991,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     const due = dueOf(it), ms = deadlineMs(it);
     if (due) {
       const dd = diffDays(due, todayY());
-      const tm = (String((it && it.deadline) || "").match(/(\d{1,2}:\d{2})/) || [])[1] || "";
+      const tm = calDate(it) ? "" : ((String((it && it.deadline) || "").match(/(\d{1,2}:\d{2})/) || [])[1] || "");
       if (dd < 0) return { t: "지연", hot: true };
       if (dd === 0) return { t: tm ? "오늘 " + tm : "오늘", hot: true };
       return { t: "D-" + dd };
@@ -2906,7 +3041,35 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     entries.filter((e) => e.day === 1 && keep(e.it))
       .sort((a, b) => (rank(a.it) - rank(b.it)))
       .forEach((e) => push(e.it, 3, bfAction(e.it)));
-    return rows;
+    /* 📌 완료하지 않은 지난 수기 일정 — ✅ 완료를 누르거나 날짜를 미래로 옮기기 전까지 계속 올라온다 (v1.2.21 #9450).
+       메일 4줄 제한에 밀리지 않도록 맨 앞에 둔다(briefData 는 수기 일정 줄을 전부 보여 준다). */
+    const cusRows = bfLateCus().map((c) => ({ cus: c, it: null, group: 0, act: String(c.memo || "").trim() }));
+    return cusRows.concat(rows);
+  }
+
+  /* 완료(done)하지 않은 지난 수기 일정(최근 BF_CUS_LATE일) — 오래된 날짜부터 */
+  function bfLateCus(today, list) {
+    const t = today || todayY();
+    const all = list || cusLoad();
+    return (all || []).filter((c) => c && !c.done && c.date && String(c.date) < t
+      && diffDays(t, c.date) <= BF_CUS_LATE)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+
+  /* 📌 수기 일정 줄 — 지난 일정은 ‘지연 (11/23)’ 배지 */
+  function bfCusRow(c, sub, badge) {
+    return '<button type="button" class="bf-row" data-bf-go="cus" data-bf-id="' + esc(c.id) + '"' +
+      ' title="' + esc(c.title + " — 누르면 캘린더 그 날짜로 이동") + '">' +
+      '<span class="bf-main"><span class="bf-tt">' + esc(c.title) + "</span>" +
+      '<span class="bf-ac">' + esc(bfClip(sub || c.memo || "수기 일정 · 캘린더에서 ✅ 완료를 누르면 브리핑에서 빠집니다")) +
+      "</span></span>" + bfBadgeHtml(badge) + "</button>";
+  }
+  function bfCusBadge(c) {
+    const dd = diffDays(c.date, todayY());
+    const md = String(c.date || "").slice(5).replace("-", "/");
+    if (dd < 0) return { t: "지연 (" + md + ")", hot: true };
+    if (dd === 0) return { t: "오늘", hot: true };
+    return { t: "D-" + dd };
   }
 
   /* ── ② 오늘·내일 일정 ─────────────────────────────────────────────────
@@ -2914,7 +3077,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   function bfCalRows() {
     const out = [];
     [[todayY(), "오늘", 0], [ymd(addDays(new Date(), 1)), "내일", 1]].forEach(([date, lab, idx]) => {
-      cusFor(date).forEach((c) => {
+      cusFor(date).filter((c) => !c.done).forEach((c) => {
         let n = 0;
         try { n = relatedMails(c).list.length; } catch (e) { n = 0; }
         out.push({ kind: "cus", id: String(c.id), title: c.title, memo: String(c.memo || "").trim(), n: n, day: lab, idx: idx });
@@ -2946,10 +3109,12 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   /* 한 번에 계산 — 요약줄과 본문이 같은 자료를 쓴다 */
   function briefData() {
     const todoAll = bfTodoList();
-    const todo = todoAll.slice(0, BRIEF_TODO_MAX);
+    /* 수기 일정 줄은 개수와 상관없이 모두 보이고, 메일 줄만 최대 4개로 자른다 (v1.2.21 #9450) */
+    const cusN = todoAll.filter((r) => r.cus).length;
+    const todo = todoAll.slice(0, cusN).concat(todoAll.slice(cusN, cusN + BRIEF_TODO_MAX));
     /* ①에 실제로 올라간 줄만 ③에서 뺀다 — 4줄 밖으로 밀린 🔴 은 ③에 다시 보인다 */
     const skip = new Set();
-    todo.forEach((r) => skip.add(String(r.it.id)));
+    todo.forEach((r) => { if (r.it) skip.add(String(r.it.id)); });   /* 수기 일정 줄(r.cus)은 메일 id 가 없다 */
     const cal = bfCalRows();
     const over = bfOvernightAll();
     const nightAll = bfNightList(skip);
@@ -2977,7 +3142,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (d.todoAll.length) {
       html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-ico">🔥</span>' +
         '<span class="bf-st">오늘 해야 할 일</span><span class="bf-n">' + d.todoAll.length + "건</span></div>" +
-        d.todo.map((r) => bfMailRow(r.it, esc(bfClip(r.act || bfReason(r.it) || "요청 내용 확인")), bfDue(r.it))).join("") +
+        d.todo.map((r) => (r.cus
+          ? bfCusRow(r.cus, r.act, bfCusBadge(r.cus))
+          : bfMailRow(r.it, esc(bfClip(r.act || bfReason(r.it) || "요청 내용 확인")), bfDue(r.it)))).join("") +
         (d.todoAll.length > d.todo.length
           ? '<div class="bf-more">외 ' + (d.todoAll.length - d.todo.length) + '건 <button type="button" data-bf-go="d3">전체 보기</button></div>'
           : "") + "</div>";
@@ -3144,7 +3311,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
        diffDays = 기준일 − 오늘  →  음수면 D+{n} 지연 · 0 오늘 · 1 D-1 · 2 D-2 · 3 D-3
      한 카드에 담는 것 (✅ 확인(완료)·회신 완료/불필요로 처리한 건은 뺀다):
        ① 메일 기한 — 🔴·🟡·📌 고정·📅 등록 메일 중 기한이 3일 안이거나 지난 것.
-          ⚪ 단순 공유는 📌·📅 로 직접 찍은 것만 (날짜만 적힌 출하리스트가 카드를 덮지 않게).
+          ⚪ 기록 보관는 📌·📅 로 직접 찍은 것만 (날짜만 적힌 출하리스트가 카드를 덮지 않게).
        ② 회신 필요 — replyStatus 가 needs_reply 인 메일. 명시 기한이 없으면 수신일+3일을
           기한으로 보고 넣되(이미 지난 일반 회신 요청도 포함) 정렬은 맨 뒤 '기한 미지정'으로 둔다.
        ③ 캘린더 — 📅 등록한 메일과 📌 개인/구두 일정 중 3일 안이거나 지난 것.
@@ -3177,6 +3344,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   /* 📌 개인/구두 일정 한 건 → D-3 항목 (일정은 완료 개념이 없어 지난 것도 지연으로 남긴다) */
   function d3CusEntry(c, byMail) {
+    if (c.done) return null;                 /* v1.2.21 #9450 — ✅ 완료한 수기 일정은 D-3·추적에서 뺀다 */
     const dd = diffDays(c.date, todayY());
     if (!d3Soon(dd)) return null;
     const linked = c.mailId && byMail.has(String(c.mailId));
@@ -3402,8 +3570,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   function sideCardCus(c) {
     const on = activeCus() && activeCus().id === c.id;
     const editing = CUS_EDIT === c.id, moving = CUS_MOVE === c.id;
-    return '<div class="side-card cus' + (on ? " active" : "") + (editing || moving ? " open" : "") + '" data-cus-sel="' + esc(c.id) + '" role="button" tabindex="0" title="이 일정과 관련된 메일을 아래 목록에 보여줍니다">' +
-      '<div class="sc-top"><span class="badge b-cus">📌 개인/구두</span><span class="sc-t">' + esc(c.title) + '</span></div>' +
+    return '<div class="side-card cus' + (on ? " active" : "") + (c.done ? " is-done" : "") + (editing || moving ? " open" : "") + '" data-cus-sel="' + esc(c.id) + '" role="button" tabindex="0" title="이 일정과 관련된 메일을 아래 목록에 보여줍니다">' +
+      '<div class="sc-top"><span class="badge b-cus' + (c.done ? " done" : "") + '">' + (c.done ? "✅ 완료" : "📌 개인/구두") + '</span><span class="sc-t">' + esc(c.title) + '</span></div>' +
       (c.memo ? '<div class="sc-m">' + esc(c.memo) + "</div>" : "") +
       (editing || moving ? "" : '<div class="sc-m">🔗 관련 메일 보기</div>') +
       cusActsHtml(c) + (editing ? cusEditFormHtml(c) : "") + (moving ? cusMoveFormHtml(c) : "") + '</div>';
@@ -3664,6 +3832,16 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     toast("📌 일정을 넣었습니다 — " + d + " · " + t.slice(0, 24));
     return true;
   }
+  /* ✅ 수기 일정 완료 토ggle — mb_cal_custom_v1(cus) 에 done 을 저장하고 화면·브리핑을 바로 다시 그린다 (v1.2.21 #9450) */
+  function cusToggleDone(id) {
+    const c = cusById(id);
+    if (!c) return;
+    if (c.done) { delete c.done; delete c.doneAt; }
+    else { c.done = true; c.doneAt = new Date().toISOString(); }
+    cusSave();                       /* localStorage + ☁️ 동기화(mbSyncMark("cus")) */
+    renderAll();                     /* 카드 배지·브리핑·D-3·KPI 즉시 갱신 */
+    toast(c.done ? "‘" + c.title + "’ 완료로 표시했습니다" : "‘" + c.title + "’ 다시 추적합니다");
+  }
   function cusDel(id) {
     const list = cusLoad(), i = list.findIndex((c) => c.id === id);
     if (i < 0) return;
@@ -3679,7 +3857,11 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   /* ---------------- ✏️ 수정 · 📅 옮기기 · ✕ 삭제 (직접 일정 카드·배너 공통) ---------------- */
   function cusActsHtml(c) {
     const id = esc(c.id);
+    /* v1.2.21 #9450 — ✅ 완료 / ↩ 완료 취소. 완료하면 브리핑 ①·D-3 카드에서 즉시 빠진다. */
     return '<div class="cus-acts">' +
+      '<button type="button" class="ca done' + (c.done ? " on" : "") + '" data-cus-done="' + id + '" aria-pressed="' + (c.done ? "true" : "false") + '" title="' +
+        (c.done ? "완료를 취소하고 다시 추적합니다(지난 일정이면 브리핑에 다시 올라옵니다)" : "완료로 표시 — 브리핑·D-3 추적에서 빠집니다") + '">' +
+        (c.done ? "↩ 완료 취소" : "✅ 완료") + "</button>" +
       '<button type="button" class="ca' + (CUS_EDIT === c.id ? " on" : "") + '" data-cus-edit="' + id + '" title="제목·메모·날짜를 고칩니다">✏️ 수정</button>' +
       '<button type="button" class="ca' + (CUS_MOVE === c.id ? " on" : "") + '" data-cus-move="' + id + '" title="제목·메모는 그대로 두고 날짜만 다른 날로 옮깁니다">📅 옮기기</button>' +
       '<button type="button" class="ca del" data-cus-del="' + id + '" title="일정 삭제" aria-label="일정 삭제">✕ 삭제</button></div>';
@@ -3789,6 +3971,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   /* 카드·배너의 수정·옮기기·빠른 날짜·취소 클릭을 한곳에서 처리 */
   function cusActionClick(e) {
+    const dn = e.target.closest("[data-cus-done]");
+    if (dn) { cusToggleDone(dn.getAttribute("data-cus-done")); return true; }
     const ed = e.target.closest("[data-cus-edit]");
     if (ed) { cusEditOpen(cusById(ed.getAttribute("data-cus-edit"))); return true; }
     const mv = e.target.closest("[data-cus-move]");
@@ -3997,7 +4181,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
 
   /* ---------------- 렌더: 탭 · 칩 ---------------- */
   function renderSeg() {
-    const rows = [["p1", "🔴 즉시 확인", p1Items()], ["p2", "🟡 흐름 참고", p2Items()], ["p3", "⚪ 단순 공유", p3Items()],
+    const rows = [["p1", "🔴 즉시 확인", p1Items()], ["p2", "🟡 흐름 참고", p2Items()], ["p3", "⚪ 기록 보관", p3Items()],
       ["fu", "⏳ 미회신 추적", null], ["pin", "📌 고정", pinnedItems()]];
     const segP1Open = p1Items().filter((i) => !isDone(i)).length;
     $("seg").innerHTML = rows.map(([k, label, list]) => {
@@ -4252,7 +4436,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     html += '<div class="sec-title">⏰ 마감 순 <span class="hint">지연 → 오늘 → D-1 → D-2 → D-3 → 기한 미지정 회신 필요</span></div>';
     html += rows.length
       ? '<div class="rows">' + rows.map((e) => e.type === "mail" ? rowHtml(e.it, { d3: e }) : d3CusRow(e)).join("") + '</div>'
-      : '<div class="empty">' + (view.replyOnly ? '이 목록에 회신이 필요한 건이 없습니다.' : '3일 안에 챙길 마감·회신·일정이 없습니다.<br>⚪ 단순 공유 메일도 <b>📌</b>으로 고정하면 기한이 3일 안일 때 여기에 들어옵니다.') + '</div>';
+      : '<div class="empty">' + (view.replyOnly ? '이 목록에 회신이 필요한 건이 없습니다.' : '3일 안에 챙길 마감·회신·일정이 없습니다.<br>⚪ 기록 보관 메일도 <b>📌</b>으로 고정하면 기한이 3일 안일 때 여기에 들어옵니다.') + '</div>';
     $("listWrap").innerHTML = html;
     $("dayChip").classList.remove("on");
   }
@@ -4351,12 +4535,12 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       if (main.length) html += bulkBarHtml(main);
       html += main.length ? rowsBlock(main) : '<div class="empty">조건에 맞는 흐름 참고 건이 없습니다.</div>';
     } else {
-      html += '<div class="banner">⚪ <div><b>단순 공유</b> — 내가 직접 건 ‘단순 공유’ 규칙(발신자·제목 키워드)에 해당하는 메일. 수신(To)이거나 이름이 지목된 메일은 규칙이 있어도 흐름 참고로 보호됩니다. 평소엔 숨겨 두고 필요할 때만 봅니다.</div></div>';
+      html += '<div class="banner">⚪ <div><b>기록 보관</b> — 내가 직접 건 ‘기록 보관’ 규칙(발신자·제목 키워드)에 해당하는 메일. 수신(To)이거나 이름이 지목된 메일은 규칙이 있어도 흐름 참고로 보호됩니다. 평소엔 숨겨 두고 필요할 때만 봅니다.</div></div>';
       if (main.length) html += bulkBarHtml(main);
-      html += main.length ? rowsBlock(main) : '<div class="empty">조건에 맞는 단순 공유 건이 없습니다.</div>';
+      html += main.length ? rowsBlock(main) : '<div class="empty">조건에 맞는 기록 보관 건이 없습니다.</div>';
     }
     if (extra.length) {
-      html += '<div class="sec-title" style="margin-top:12px">검색 결과 · ⚪ 단순 공유 <span class="hint">' + extra.length + "건</span></div>" + rowsBlock(extra);
+      html += '<div class="sec-title" style="margin-top:12px">검색 결과 · ⚪ 기록 보관 <span class="hint">' + extra.length + "건</span></div>" + rowsBlock(extra);
     }
     if (history.length) {
       const hIn = history.filter((it) => (it.mailbox || "inbox") !== "sent");
@@ -4485,7 +4669,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
      renderAll()로 KPI·탭 건수·목록이 새로고침 없이 즉시 다시 분류된다. */
   const RM = { tab: "send", q: "", draft: null, page: 1 };
   const RM_PAGE = 20;
-  const RM_RANK_LABEL = { 1: "🔴 즉시", 2: "🟡 흐름 참고", 3: "⚪ 단순 공유" };
+  const RM_RANK_LABEL = { 1: "🔴 즉시", 2: "🟡 흐름 참고", 3: "⚪ 기록 보관" };
 
   const TITLE_RE = /(부장|상무|전무|이사|차장|과장보|과장|대리|사원|주임|팀장|실장|소장|본부장|대표|사장)$/;
   const MAIL_RE = /^[^\s@,]+@[^\s@,]+$/;
@@ -4630,7 +4814,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (i >= 0) RM.draft.senders[i] = rec; else RM.draft.senders.push(rec);
   }
   const psegHtml = (key, p) => '<span class="pseg">' +
-    [[0, "기본"], [1, "🔴 즉시"], [2, "🟡 흐름 참고"], [3, "⚪ 단순 공유"]].map(([v, l]) =>
+    [[0, "기본"], [1, "🔴 즉시"], [2, "🟡 흐름 참고"], [3, "⚪ 기록 보관"]].map(([v, l]) =>
       '<button type="button" data-rm-p="' + v + '" data-key="' + esc(key) + '" class="' + (p === v ? "on" : "") + '">' + l + "</button>").join("") + "</span>";
 
   /* 주소록 한 줄의 부서 표기 — 개인주소록은 그룹명을 함께 보여준다 */
@@ -4698,7 +4882,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   function rmKwHtml() {
     if (!RM.draft.keywords.length) return '<div class="rm-empty">아직 키워드 규칙이 없습니다. 예: ‘긴급’, ‘용기승인’, ‘정례회의’, ‘출하리스트’</div>';
     return RM.draft.keywords.map((k, i) => '<div class="kw-row"><span class="kw-t">' + esc(k.text) + "</span>" +
-      '<span class="pseg">' + [[1, "🔴 즉시"], [2, "🟡 흐름 참고"], [3, "⚪ 단순 공유"]].map(([v, l]) =>
+      '<span class="pseg">' + [[1, "🔴 즉시"], [2, "🟡 흐름 참고"], [3, "⚪ 기록 보관"]].map(([v, l]) =>
         '<button type="button" data-rm-kwp="' + v + '" data-i="' + i + '" class="' + (k.priority === v ? "on" : "") + '">' + l + "</button>").join("") + "</span>" +
       '<button type="button" class="kw-del" data-rm-kwdel="' + i + '" aria-label="삭제" title="이 키워드 규칙 삭제">✕</button></div>').join("");
   }
@@ -4713,22 +4897,22 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     let html = "";
     if (RM.tab === "send") {
       html += '<div class="rm-note">기본 설정된 최우선·주요 발신자 규칙은 그대로 유지됩니다. 여기서 고른 등급만 그 위에 덧씌워집니다. ' +
-        '<br><b>적용 순서</b> ① 발신자 규칙 → ② 제목 키워드 규칙 → ③ 기본 분류(수신 To·이름 지목 → 🔴 즉시 / 참조 CC → 🟡 흐름 참고). ⚪ 단순 공유 규칙은 수신(To)·지목 메일에는 적용되지 않고 🟡 흐름 참고로 보호됩니다. ' +
+        '<br><b>적용 순서</b> ① 발신자 규칙 → ② 제목 키워드 규칙 → ③ 기본 분류(수신 To·이름 지목 → 🔴 즉시 / 참조 CC → 🟡 흐름 참고). ⚪ 기록 보관 규칙은 수신(To)·지목 메일에는 적용되지 않고 🟡 흐름 참고로 보호됩니다. ' +
         '목록은 <b>사내 웹메일 주소록 전체</b>(조직도 392명 + 개인주소록)와 지금까지 오간 메일 발신자를 합친 것입니다 — 이름·부서·이메일로 찾고 페이지를 넘겨 지정하세요.</div>' +
         '<label class="rm-search">🔍<input id="rmQ" type="search" placeholder="이름 · 부서 · 이메일로 찾기" value="' + esc(RM.q) + '" autocomplete="off"></label>' +
         '<form class="rm-add" id="rmAddForm" autocomplete="off"><span class="lbl">＋ 직접 추가</span>' +
         '<input type="text" id="rmAddName" placeholder="이름" maxlength="40" aria-label="발신자 이름" style="flex:1 1 90px">' +
         '<input type="email" id="rmAddEmail" placeholder="이메일" maxlength="80" aria-label="발신자 이메일" style="flex:1 1 140px">' +
-        '<select class="rm-sel" id="rmAddP" aria-label="등급"><option value="1">🔴 즉시</option><option value="2">🟡 흐름 참고</option><option value="3" selected>⚪ 단순 공유</option></select>' +
+        '<select class="rm-sel" id="rmAddP" aria-label="등급"><option value="1">🔴 즉시</option><option value="2">🟡 흐름 참고</option><option value="3" selected>⚪ 기록 보관</option></select>' +
         '<button type="submit" class="mini on">추가</button></form>' +
         '<div class="rm-count">주소록 ' + addressBook().length + '명(웹메일 주소록 + 메일 발신자) · 그중 내 규칙 ' + RM.draft.senders.length + '명' +
           (RM.q.trim() ? ' · 검색 “' + esc(RM.q.trim()) + '”' : '') + '</div>' +
         '<div id="rmList">' + rmListHtml() + "</div>";
     } else {
-      html += '<div class="rm-note">제목에 이 단어가 들어간 메일을 고른 등급으로 분류합니다. 적용 순서는 <b>① 발신자 규칙 → ② 제목 키워드 규칙 → ③ 기본 분류</b>(수신 To·이름 지목 → 🔴 즉시 / 참조 CC → 🟡 흐름 참고)이고, ⚪ 단순 공유 규칙은 수신(To)·지목 메일에는 적용되지 않습니다.</div>' +
+      html += '<div class="rm-note">제목에 이 단어가 들어간 메일을 고른 등급으로 분류합니다. 적용 순서는 <b>① 발신자 규칙 → ② 제목 키워드 규칙 → ③ 기본 분류</b>(수신 To·이름 지목 → 🔴 즉시 / 참조 CC → 🟡 흐름 참고)이고, ⚪ 기록 보관 규칙은 수신(To)·지목 메일에는 적용되지 않습니다.</div>' +
         '<form class="rm-add" id="rmKwForm" autocomplete="off"><span class="lbl">＋ 키워드 추가</span>' +
         '<input type="text" id="rmKwText" placeholder="제목 키워드 (예: 긴급)" maxlength="40" aria-label="제목 키워드" style="flex:1 1 160px">' +
-        '<select class="rm-sel" id="rmKwP" aria-label="등급"><option value="1">🔴 즉시</option><option value="2">🟡 흐름 참고</option><option value="3" selected>⚪ 단순 공유</option></select>' +
+        '<select class="rm-sel" id="rmKwP" aria-label="등급"><option value="1">🔴 즉시</option><option value="2">🟡 흐름 참고</option><option value="3" selected>⚪ 기록 보관</option></select>' +
         '<button type="submit" class="mini on">추가</button></form>' +
         '<div class="rm-count">키워드 규칙 ' + RM.draft.keywords.length + '개</div>' +
         '<div id="rmList">' + rmKwHtml() + "</div>";
@@ -4788,7 +4972,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     "완료", "현황", "리스트", "목록", "사항", "결과", "문의", "신청", "제출", "대한", "위한", "관한",
     "최종", "추가", "공유", "회의", "정도", "바랍니다"];
 
-  function rqRankName(p) { return p === 1 ? "즉시" : p === 2 ? "흐름 참고" : "단순 공유"; }
+  function rqRankName(p) { return p === 1 ? "즉시" : p === 2 ? "흐름 참고" : "기록 보관"; }
   /* 이 메일의 발신자 — 규칙 키(이메일 우선, 없으면 이름) */
   function rqSender(it) {
     const email = String((it && it.senderEmail) || "").toLowerCase().trim();
@@ -4948,9 +5132,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
      목록 행 오른쪽 버튼 줄의 [🔴 즉시 ▾] 하나로, 메일을 열지 않고 그 발신자(또는 제목 키워드)의
      앞으로 자동 분류 규칙을 정한다. 저장소·판정은 상세 원클릭 규칙과 같다
      (localStorage mb_rules_v1 · 포털은 /api/state rules). */
-  function rankName(p) { return p === 1 ? "🔴 즉시" : p === 2 ? "🟡 흐름 참고" : "⚪ 단순 공유"; }
+  function rankName(p) { return p === 1 ? "🔴 즉시" : p === 2 ? "🟡 흐름 참고" : "⚪ 기록 보관"; }
   function rankEmoji(p) { return p === 1 ? "🔴" : p === 2 ? "🟡" : "⚪"; }
-  function rankText(p) { return p === 1 ? "즉시" : p === 2 ? "흐름 참고" : "단순 공유"; }
+  function rankText(p) { return p === 1 ? "즉시" : p === 2 ? "흐름 참고" : "기록 보관"; }
   function rankTogHtml(it) {
     const p = priorityOf(it), rl = ruleForItem(it);
     const t = "이 메일을 열지 않고 바로 분류 — 발신자(또는 제목 키워드) 자동 규칙을 정합니다" +
@@ -5281,7 +5465,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   function badgeRow(it) {
     const p = priorityOf(it), d = dueInfo(it), r = replyOf(it), rl = ruleForItem(it);
     const parts = [];
-    parts.push('<span class="badge b-p' + p + '">' + (p === 1 ? "🔴 즉시 확인" : p === 2 ? "🟡 흐름 참고" : "⚪ 단순 공유") + "</span>");
+    parts.push('<span class="badge b-p' + p + '">' + (p === 1 ? "🔴 즉시 확인" : p === 2 ? "🟡 흐름 참고" : "⚪ 기록 보관") + "</span>");
     if (rl) parts.push('<span class="badge b-rule" title="⚙️ 내 분류 규칙으로 지정됨 · ' +
       esc((rl.kind === "sender" ? "발신자" : "제목 키워드") + " ‘" + rl.label + "’") + '">⚙️ 내 규칙</span>');
     if (p === 1) {
@@ -5383,7 +5567,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   /* ───── 📝 메일 분석 3단 렌더 (v1.2.11) ─────
      서버가 조립한 `1) 🔄 진행 경과 / 2) 🎯 주담당 판별 / 3) ✅ 결론` 을 소제목 카드로 나눠 보여 준다.
      예전 1줄 요약 메일은 그대로 summaryHtml() 로 호환한다.
-     AI 를 건너뛴 메일(⚪ 단순 공유 · 타 부서 참조)은 안내 문구와 [✨ AI 요약 실행] 버튼을 보여 준다(포털). */
+     AI 를 건너뛴 메일(⚪ 기록 보관 · 타 부서 참조)은 안내 문구와 [✨ AI 요약 실행] 버튼을 보여 준다(포털). */
   const ANA_HEAD = /^\s*([123])\s*[).]\s*(🔄|🎯|✅)\s*(.*)$/;
   function parseAnalysis(text) {
     const out = [];
@@ -6135,6 +6319,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
        그래서 상세는 제목 · 📌 고정 · ✕ 바로 아래에서 📄 메일 원문부터 시작한다. */
     return '<div class="dr-head"><div style="flex:1;min-width:0">' +
         "<h2>" + esc(it.title) + "</h2></div>" +
+        /* v1.2.21 — 웹메일 원본 ↗ 은 상세 제목 줄(📌 고정 · ✕ 옆) 한 곳뿐이다(하단 중복 바 삭제) */
+        '<a class="mini dr-origin" href="' + esc(it.mailLink || "#") + '" target="_blank" rel="noopener" title="이 메일의 회사 웹메일 원본을 새 창에서 엽니다">웹메일 원본 ↗</a>' +
         '<button type="button" class="dr-pin' + (isPinned(it) ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (isPinned(it) ? "true" : "false") + '" title="' +
           esc(isPinned(it) ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다 (분류·완료와 무관하게 ‘📌 고정’ 탭에 모여 있습니다)" : "📌 고정 — 원래 탭에서 ‘📌 고정’ 탭으로 옮겨 둡니다") + '">📌 ' + (isPinned(it) ? "고정됨" : "고정") + "</button>" +
         '<button class="dr-close" id="drClose" aria-label="닫기">✕</button></div>' +
@@ -6160,26 +6346,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="dr-sec"><div class="sec-h">🗒️ 내 메모</div>' +
           '<textarea class="memo" data-memo="' + it.id + '" placeholder="처리 내용·연락한 사람·특이사항 (이 기기에만 저장)">' + esc(st.memo || "") + "</textarea></div>" +
       "</div>" +
-      /* v1.2.19 — 하단 액션 두 줄: 1줄 회신 상태 + 웹메일 원본 ↗, 2줄 📅 캘린더 등록 · 날짜 · ✅ 확인.
-         ‘진행 상태 [대기 ▾]’ 선택은 사용자 요청으로 걷어냈다(상태 값 자체는 하위 호환으로 유지). */
-      '<div class="dr-foot">' +
-        '<div class="ft-row">' +
-          '<span class="ft-lab">회신 상태</span>' +
-          '<div class="reply-row">' +
-            ["needs_reply", "replied", "no_reply_needed"].map((k) =>
-              '<button class="reply-btn ' + (r === k ? "on" : "") + '" data-reply="' + k + '" data-reply-id="' + it.id + '">' + REPLY_LABEL[k] + "</button>").join("") +
-          "</div>" +
-          '<a class="mini ft-origin" href="' + esc(it.mailLink || "#") + '" target="_blank" rel="noopener" title="웹메일 원본을 새 창에서 엽니다">웹메일 원본 ↗</a>' +
-        "</div>" +
-        '<div class="ft-row">' +
-          /* v1.2.19 — ‘진행 상태 [대기 ▾]’ 선택은 사용자 요청으로 걷어냈다. 저장된 status 값은 하위 호환으로 그대로 둔다 */
-          '<span class="ft-lab ft-lab-sp" aria-hidden="true"></span>' +
-          '<button type="button" class="mini' + (calDate(it) ? " on" : "") + '" data-cal-tog="' + esc(it.id) + '">📅 ' + (calDate(it) ? "캘린더 등록됨" : "캘린더 등록") + "</button>" +
-          '<label class="cal-date" title="등록 날짜 바꾸기"><span class="cal-lab">날짜</span><input type="date" data-cal-date="' + esc(it.id) + '" value="' + esc(calDate(it) || calDefaultDate(it)) + '"></label>' +
-          '<button type="button" class="mini" data-done-tog="' + esc(it.id) + '">' + (isDone(it) ? "↩ 완료 취소" : "✅ 확인") + "</button>" +
-          '<span class="sp">' + esc(it.id) + "</span>" +
-        "</div>" +
-      "</div>";
+      /* v1.2.21 — 상세 하단의 중복 액션 바(회신 상태 · 📅 캘린더 등록 · 날짜 · ✅ 확인 · 메일 ID)는 지웠다.
+         같은 기능이 목록 행에 있고, ‘웹메일 원본 ↗’ 은 제목 줄(📌 고정 · ✕ 옆)로 올렸다. */
+      "";
   }
 
   function mailtoHref(d) {
@@ -6988,7 +7157,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       cards: [
         { t: "🔴 즉시 — 지금 확인", d: "최우선·주요 발신자, 본인이 직접 지목된 메일, 직접 수신(To) 메일을 목록 최상단에 고정합니다." },
         { t: "🟡 흐름 참고 — 주요 이슈", d: "고객사(GM) 왕복과 사내 주요 이슈를 모아, 진행 상황만 빠르게 확인합니다." },
-        { t: "⚪ 단순 공유 — 자동 분리", d: "반복되는 출하·납입 리스트는 자동으로 분리해 기본 화면을 가볍게 유지합니다." }
+        { t: "⚪ 기록 보관 — 자동 분리", d: "반복되는 출하·납입 리스트는 자동으로 분리해 기본 화면을 가볍게 유지합니다." }
       ],
       sum: [
         "<b>상단 KPI에 등급별 건수</b>가 보이고, 카드를 누르면 그 등급만 모아 봅니다",

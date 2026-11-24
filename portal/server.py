@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.20"
+VERSION = "1.2.21"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1121,6 +1121,8 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             try:      # 새 메일이 없어도 예전 요약·답장 초안은 한 번 정리한다 (v1.2.7 · v1.2.8)
                 fixed = sm.refresh_copied_summaries(board["items"], contacts)
                 fixed += sm.refresh_reply_drafts(board["items"])
+                # v1.2.21 — 예전 수집분도 본문 인용 스레드(From:/Sent:)를 히스토리에 채운다
+                fixed += sm.enrich_threads_from_body(board["items"])
                 # v1.2.17 — 사진 첨부 썸네일: 새 메일이 없는 실행에서도 빈 칩·주소 없는 사진 첨부를 몇 건씩 고친다
                 fixed += sm.refresh_attachment_meta(nm, board["items"], limit=4)
                 if fixed:
@@ -1138,9 +1140,9 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         done = 0
 
         def analyze(mail: dict, kind: str) -> dict:
-            # v1.2.11 — 단순 공유는 AI 생략, 타 부서 참조는 경량, 나머지는 3단 정밀 분석(스레드 증분)
+            # v1.2.21 — 기록 보관만 AI 생략, 나머지는 3단 정밀 분석(스레드 증분) · 첨부 핵심 내용 포함
             return sm.analyze_mail(gem, mail, kind, contacts,
-                                   thread_cache=board["thread_cache"], stats=report)
+                                   thread_cache=board["thread_cache"], stats=report, fetcher=nm)
 
         def tick(phase: str) -> None:
             nonlocal done
@@ -1555,7 +1557,7 @@ def similar_analyze(uid: str, mail_id: str) -> dict:
 
 
 # ────────────────────────────────────────────────────────────── ✨ 메일 1통 온디맨드 3단 분석
-#  ⚪ 단순 공유·타 부서 참조로 AI 분석을 건너뛴 메일을, 사용자가 [✨ AI 요약 실행] 을 눌렀을 때만
+#  ⚪ 기록 보관·타 부서 참조로 AI 분석을 건너뛴 메일을, 사용자가 [✨ AI 요약 실행] 을 눌렀을 때만
 #  전체 스레드 + 조직 컨텍스트로 정밀 분석한다. 결과는 board.json 에 저장되어 다시 누르면 0 호출.
 ANALYSIS_FIELDS = ("summary", "headline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
                    "threadGist", "actionItems", "replyDrafts", "replyStatus", "dueDate", "deadline",
@@ -1603,6 +1605,23 @@ def mail_analyze(uid: str, mail_id: str) -> dict:
         "date": item.get("receivedAt") or "",
         "attachments": item.get("attachments") or [],
     }
+    # v1.2.21 — 수동 정밀 분석도 첨부(.xlsx/.pdf/.docx…) 내용을 열어 본다.
+    #   저장된 첨부 요약이 있으면 그대로 쓰고, 없으면 웹메일 세션으로 원문 1통을 다시 읽어 뽑는다.
+    if item.get("attachmentText"):
+        mail["attachmentText"] = item["attachmentText"]
+    fetcher = None
+    if not mail.get("attachmentText"):
+        try:
+            pw = load_cred(uid)
+            if pw:
+                fetcher = NMAIL_CLASS(uid, pw, ip_check=str(CFG["ip_check"]))
+                fetcher.login()
+                fresh = fetcher.read_mail(item.get("mailbox") or "inbox", mail["mf_no"])
+                if fresh.get("attachments"):
+                    mail["attachments"] = fresh["attachments"]
+        except Exception as e:  # noqa: BLE001 - 첨부를 못 열면 본문만으로 분석한다
+            fetcher = None
+            print(f"[analyze] {uid} {mail_id} 첨부 확인 실패: {type(e).__name__}", file=sys.stderr)
     stats: dict[str, Any] = {"gemini_calls": 0, "warnings": []}
     with SYNC_LOCK:                 # sync_mail 의 전역 분류 상태(OWNER·ME)를 동기화와 섞지 않는다
         owner = board.get("owner") or user_meta(uid).get("owner") or {}
@@ -1610,7 +1629,7 @@ def mail_analyze(uid: str, mail_id: str) -> dict:
         gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"])
         analysis = sm.analyze_mail(gem, mail, "받은편지함", contacts,
                                    thread_cache=board.setdefault("thread_cache", {}),
-                                   stats=stats, force_deep=True)
+                                   stats=stats, force_deep=True, fetcher=fetcher)
     if analysis.get("aiSkipped"):     # force_deep 인데도 건너뛴 경우는 오류로 알린다
         raise RuntimeError("AI 분석을 실행하지 못했습니다 (생략 판정)")
     for key in ANALYSIS_FIELDS:
@@ -2518,7 +2537,7 @@ class PortalHandler(BaseHTTPRequestHandler):
               f"{' (캐시)' if result.get('cached') else ''}", flush=True)
 
     def _api_mail_analyze(self) -> None:
-        """✨ AI 요약 실행 — 단순 공유로 건너뛴 메일 1통만 정밀 분석한다(결과는 보드에 저장)."""
+        """✨ AI 요약 실행 — 기록 보관로 건너뛴 메일 1통만 정밀 분석한다(결과는 보드에 저장)."""
         uid = self._require_user()
         if not uid:
             return

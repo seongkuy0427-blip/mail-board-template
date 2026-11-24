@@ -809,11 +809,12 @@ def run(pin: str, keep: bool) -> int:
                  from_raw="류광종 <ryu@chunil.co.kr>", from_email="ryu@chunil.co.kr",
                  to=["해외물류부 <overseas@chunil.co.kr>"], cc=["김성규 <kimpro@chunil.co.kr>"])
     res3 = sm.analyze_mail(_Gem(), other, "받은편지함", contacts, thread_cache={})
-    check("타 부서 참조(CC) — 경량 요약 · AI 호출 없음",
-          res3["aiSkipped"] and res3["aiSkipReason"] == "other_dept"
-          and res3["summary"].startswith(sm.LIGHT_TAG) and len(gem_texts) == 1
+    # v1.2.21 — 🟡 흐름 참고(타 부서 참조 CC)도 처음부터 AI 3단 분석(경량 1줄 분기 제거)
+    check("🟡 흐름 참고(타 부서 참조 CC) — AI 3단 분석 자동 실행",
+          not res3.get("aiSkipped") and res3.get("aiSkipReason") != "other_dept"
+          and sm.is_detailed_summary(res3["summary"]) and len(gem_texts) == 2
           and "없음" in res3["ourDeptAction"],
-          res3["summary"][:70])
+          res3["summary"].splitlines()[0][:60])
 
     store: dict = {}
     first = dict(thread_mail, mf_no=990003, subject="RE: 스레드 증분 확인",
@@ -1031,6 +1032,149 @@ def run(pin: str, keep: bool) -> int:
     if a:
         check("카드 원본 링크 — 편지함(mb_id)·메일번호(mf_no)가 주소에 그대로 들어간다(v1.2.19)",
               a.get("mailLink") == sm.MAIL_LINK % ("inbox", base + 1), str(a.get("mailLink")))
+    # ─────────────────────────────────────────────────────────── v1.2.21
+    #  ① 본문 인용 스레드(From:/Sent:/보낸사람:) → 히스토리  ② 첨부(.xlsx) 핵심 내용 → 분석 프롬프트
+    #  ③ ⚪ 기록 보관만 AI 생략 (🟡 흐름 참고는 위에서 확인)
+    quote_mail = {"mf_no": 990010, "subject": "RE: [EXTERNAL] DUNS 0421311034 METASENSE WUXI Label Deviation",
+                  "date": "2026-11-24 15:12", "from_raw": "김성규 <kimpro@chunil.co.kr>",
+                  "from_email": "kimpro@chunil.co.kr", "to": ["Yeom, Juhee <johhee.yeom@gm.com>"],
+                  "cc": [], "mailLink": sm.MAIL_LINK % ("inbox", 990010),
+                  "bodyText": ("확인했습니다. 라벨 시료 검토 결과 회신드립니다.\n\n"
+                               "-----Original Message-----\n"
+                               "From: \"Yeom, Juhee\" <johhee.yeom@gm.com>\n"
+                               "Sent: Monday, November 24, 2026 9:15 AM\n"
+                               "To: Kim, Seong Gyu <kimpro@chunil.co.kr>\n"
+                               "Subject: RE: [EXTERNAL] DUNS 0421311034 METASENSE WUXI Label Deviation\n\n"
+                               "Seong Gyu,\nPlease review the label sample and reply by 11/25.\n")}
+    quote_item = sm.build_item(quote_mail, {"summary": "", "timeline": ["[11/24] 확인"]}, contacts, sm.kst_now())
+    qthr = quote_item.get("thread") or []
+    check("본문 인용 스레드 — 1통만 와도 히스토리가 2줄(From:/Sent:)",
+          len(qthr) == 2 and any(str(t.get("date")).startswith("2026-11-24 09:15") for t in qthr),
+          str([(t.get("date"), t.get("from")) for t in qthr]))
+    check("본문 인용 스레드 — 발신자·요지가 사람이 읽을 수 있는 형태",
+          any("Yeom, Juhee" in str(t.get("from")) for t in qthr)
+          and any("DUNS" in str(t.get("gist")) for t in qthr),
+          str(qthr))
+    check("본문 인용 스레드 — 같은 본문을 다시 합쳐도 늘지 않는다(dedup)",
+          sm.merge_quoted_thread(qthr, quote_mail["bodyText"]) == qthr)
+    ko_quote = ("하기 첨부 참조 바랍니다.\n\n-----Original Message-----\n"
+                "보낸 사람: 서은태 <seyou@chunil.co.kr>\n보낸 날짜: 2026-11-24 14:46\n"
+                "제목: RE: 지게차 작업원 일일 차량점검 양식_261116-23\n\n"
+                "안녕하십니까.\n요청하신 자료를 첨부 파일로 송부드리오니 참조 바랍니다.\n")
+    ko_entries = sm.quoted_thread_entries(ko_quote)
+    check("본문 인용 스레드 — 한글 보낸사람/보낸 날짜도 읽는다",
+          len(ko_entries) == 1 and ko_entries[0]["date"] == "2026-11-24 14:46"
+          and "서은태" in ko_entries[0]["from"] and "첨부 파일로 송부" in ko_entries[0]["gist"],
+          str(ko_entries))
+    enrich_items = [{"id": "m-x", "receivedAt": "2026-11-24 15:12", "thread": [
+        {"id": "m-x", "date": "2026-11-24 15:12", "from": "김성규", "gist": "요지"}],
+        "bodyText": ko_quote}]
+    check("예전 수집분도 인용 스레드 보강(enrich)",
+          sm.enrich_threads_from_body(enrich_items) == 1
+          and len(enrich_items[0]["thread"]) == 2
+          and sm.enrich_threads_from_body(enrich_items) == 0,
+          str(len(enrich_items[0]["thread"])))
+
+    # .xlsx — openpyxl 이 있으면 그것으로, 없으면 표준 zipfile+xml 로 읽는다
+    import io as _io
+    xlsx_blob = b""
+    try:
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "점검기록"
+        ws.append(["점검일", "차량번호", "점검항목", "결과"])
+        for i in range(3):
+            ws.append([f"2026-11-{16 + i}", f"12가{3456 + i}", "타이어", "규정위반"])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        xlsx_blob = buf.getvalue()
+    except Exception:  # noqa: BLE001 - 라이브러리가 없으면 표준 폴백만 검사
+        xlsx_blob = b""
+    if xlsx_blob:
+        sxl = sm.extract_attachment_text("점검기록_261116-23.xlsx", xlsx_blob)
+        check(".xlsx 첨부 — 시트·머리글·행 값 추출",
+              "점검기록" in sxl and "차량번호" in sxl and "규정위반" in sxl, sxl[:60])
+        std = sm._xlsx_text_stdlib(xlsx_blob)
+        check(".xlsx 첨부 — 외부 라이브러리 없이 표준 zipfile+xml 폴백",
+              "차량번호" in std and "12가3456" in std, std[:60])
+        att_mail = {"mf_no": 990011, "subject": "납입 차량 점검 기록 발송", "bodyText": "첨부 파일 참조 바랍니다.",
+                    "from_raw": "서은태 <seyou@chunil.co.kr>", "from_email": "seyou@chunil.co.kr",
+                    "date": "2026-11-24 14:46", "to": ["김기경 <k@chunil.co.kr>"],
+                    "cc": ["김성규 <kimpro@chunil.co.kr>"], "mailLink": sm.MAIL_LINK % ("inbox", 990011),
+                    "attachments": [{"name": "점검기록_261116-23.xlsx", "size": "15.28 KB",
+                                     "url": sm.BASE + "/mail_attach_down.php?mf_no=990011"}]}
+
+        class _AttNmail:
+            def fetch_bytes(self, url, cap=400_000):
+                return xlsx_blob
+
+        gem_texts.clear()
+        att_res = sm.analyze_mail(_Gem(), att_mail, "받은편지함", contacts, thread_cache={},
+                                  fetcher=_AttNmail())
+        check("첨부 메일 — 분석 프롬프트에 [첨부파일 핵심 요약] 주입",
+              len(gem_texts) == 1 and "[첨부파일 핵심 요약]" in gem_texts[0]
+              and "규정위반" in gem_texts[0],
+              (gem_texts[0].split("[첨부파일 핵심 요약]")[-1][:60] if gem_texts else "AI 미호출"))
+        att_item = sm.build_item(dict(att_mail, attachmentText=att_mail.get("attachmentText") or ""),
+                                 att_res, contacts, sm.kst_now())
+        check("첨부 메일 — 화면 한 줄 요약(attachmentSummary)도 남는다",
+              "점검기록" in str(att_item.get("attachmentSummary") or "")
+              and "차량번호" in str(att_item.get("attachmentSummary") or ""),
+              str(att_item.get("attachmentSummary"))[:60])
+        big = {k: v for k, v in att_mail.items() if k != "attachmentText"}
+        big["attachments"] = [{"name": "big.xlsx", "size": "9 MB", "url": "u"}]
+
+        class _BigNmail:
+            def fetch_bytes(self, url, cap=400_000):
+                return None            # 3MB 초과·실패 → 조용히 건너뛴다
+
+        gem_texts.clear()
+        sm.analyze_mail(_Gem(), big, "받은편지함", contacts, thread_cache={}, fetcher=_BigNmail())
+        check("첨부 실패·대용량 — 조용히 건너뛰고 본문만으로 분석",
+              len(gem_texts) == 1 and "[첨부파일 핵심 요약]" not in gem_texts[0])
+    # 발신자가 우리 부서(팀원)인 메일 — ‘발신자에게 회신 필요’로 뒤집던 버그 (v1.2.21 · #9400)
+    team_contacts = dict(contacts)
+    OUR_DEPT = str(sm.OWNER.get("dept") or "납입1팀")
+    team_contacts["kanghan@chunil.co.kr"] = {"name": "강한", "title": "사원", "dept": OUR_DEPT}
+    team_contacts["jhg@chunil.co.kr"] = {"name": "정하건", "title": "사원", "dept": "경영지원팀"}
+    team_mail = {"mf_no": 990020, "subject": "RE: AIBT 자격증 원서접수 현황 회신 요청",
+                 "bodyText": "해당자 없습니다.", "from_raw": "강한 <kanghan@chunil.co.kr>",
+                 "from_email": "kanghan@chunil.co.kr", "date": "2026-11-24 14:34",
+                 "to": ["정하건 <jhg@chunil.co.kr>"], "cc": ["김성규 <kimpro@chunil.co.kr>"],
+                 "mailLink": sm.MAIL_LINK % ("inbox", 990020)}
+    team_ruling = sm.dept_ruling(team_mail, team_contacts)
+    team_our, team_my = sm.concrete_actions(team_mail, team_contacts, ruling=team_ruling)
+    check("우리 팀원이 보낸 회신 완료 메일 — 발신자를 우리 부서로 인식(v1.2.21)",
+          sm.sender_is_ours(team_mail, team_contacts) and team_ruling["sender_ours"]
+          and team_ruling["reply_done"], str(team_ruling)[:80])
+    check("우리 팀원이 보낸 메일 — ‘회신·송부 완료 · 우리 부서(발신자) → 수신자에게 처리 완료’",
+          team_our.startswith("[회신·송부 완료") and "정하건" in team_our
+          and not team_our.startswith("[직접 회신 필요") and "강한에게" not in team_our,
+          team_our)
+    team_heur = sm.heuristic_analysis(team_mail, False, team_contacts)
+    check("우리 팀원이 보낸 메일 — replyStatus no_reply_needed · 할 일 비움",
+          team_heur["replyStatus"] == "no_reply_needed" and team_heur["actionItems"] == []
+          and "[회신·송부 완료" in team_heur["ourDeptAction"], team_heur["ourDeptAction"])
+    team_pol = sm.polish_actions({"ourDeptAction": "[직접 회신 필요] 원서접수 현황 확인 → 사내 강한에게 결과 회신",
+                                  "myAction": "[직접 회신 필요] 확인", "replyStatus": "needs_reply",
+                                  "actionItems": ["강한에게 결과 회신"], "mainDept": "납입1팀",
+                                  "deptBasis": ""}, team_mail, team_contacts)
+    check("AI 가 ‘강한에게 회신’으로 거꾸로 써도 후처리에서 바로잡는다(v1.2.21)",
+          team_pol["ourDeptAction"].startswith("[회신·송부 완료")
+          and team_pol["replyStatus"] == "no_reply_needed" and team_pol["actionItems"] == []
+          and "강한에게" not in team_pol["ourDeptAction"], team_pol["ourDeptAction"])
+    team_req = dict(team_mail, mf_no=990021, subject="AIBT 자격증 원서접수 요청",
+                    bodyText="원서접수 부탁드립니다.", cc=[])
+    team_req_ruling = sm.dept_ruling(team_req, team_contacts)
+    team_req_our, _ = sm.concrete_actions(team_req, team_contacts, ruling=team_req_ruling)
+    check("우리 팀원이 보낸 ‘새 요청’ — 발신자에게 회신이 아니라 상대 회신 대기로",
+          team_req_ruling["sender_ours"] and not team_req_ruling["reply_done"]
+          and "회신 대기" in team_req_our and "강한에게" not in team_req_our, team_req_our)
+
+    check("명칭 통일 — AI 생략 안내가 ‘기록 보관‘", sm.SKIP_SIMPLE_SUMMARY.startswith("기록 보관")
+          and "단순 공유" not in sm.SKIP_SIMPLE_SUMMARY, sm.SKIP_SIMPLE_SUMMARY)
+
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)
