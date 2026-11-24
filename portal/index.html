@@ -674,12 +674,17 @@
     box-shadow:-24px 0 64px -32px rgba(9,9,11,.28); transform:translateX(102%); transition:transform .22s ease}
   #drawer.on{transform:translateX(0)}
   #drawerContent{display:flex; flex-direction:column; flex:1; min-height:0; height:100%}
-  .dr-head{display:flex; align-items:flex-start; gap:8px; padding:14px 16px 12px; border-bottom:1px solid var(--line); background:#fff; flex:none}
+  .dr-head{display:flex; align-items:flex-start; gap:8px; padding:14px 16px 8px; border-bottom:1px solid var(--line); background:#fff; flex:none}
   .dr-head .badges{display:flex; flex-wrap:wrap; gap:4px; margin-bottom:7px}
   .dr-head h2{font-size:14.5px; margin:0; letter-spacing:-.015em; line-height:1.45; flex:1; min-width:0; font-weight:600}
   .dr-close{flex:none; width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:13px;color:var(--ink-2)}
   .dr-close:hover{background:#fafafa; border-color:#d4d4d8}
   .dr-body{overflow-y:auto; padding:0 0 20px; flex:1; min-height:0}
+  /* 📑 v1.2.15 — 제목·📌·✕ 바로 아래에서 첫 섹션(📄 메일 원문)이 시작되도록 위 여백만 줄인다 */
+  .dr-body>.dr-sec.fold:first-child, .dr-body>.dr-backbar+.dr-sec.fold{padding-top:7px}
+  .sec-none{font-size:11.3px; color:var(--ink-3); line-height:1.55}
+  /* 💡 분석 안으로 들어온 과거 유사 사례 제안 줄 — 섹션 여백 안에서 한 줄로 */
+  .dr-sec .case-hint{margin:9px 0 0}
   .dr-sec{padding:12px 16px; border-bottom:1px solid var(--line-2)}
   .dr-sec:last-child{border-bottom:none}
   .sec-h{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--ink-2); margin-bottom:7px; letter-spacing:-.01em}
@@ -895,47 +900,6 @@
   .dr-foot{display:flex; align-items:center; gap:7px; padding:10px 16px; border-top:1px solid var(--line); background:#fafafa; flex-wrap:wrap; flex:none}
   .dr-foot .reply-row{flex:1 1 auto}
   .dr-foot .sp{margin-left:auto; font-size:10.3px; color:var(--ink-3)}
-  /* ---------- ⚡ 상세 패널 원클릭 분류 규칙 (v1.2.12) ----------
-     지금 보는 메일의 발신자(또는 제목 키워드)에 등급을 바로 걸어 두는 줄.
-     ⚙️ 분류 규칙 설정과 같은 저장소(mb_rules_v1 · 포털 /api/state rules)를 쓴다. */
-  .dr-quick{display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:8px 16px;
-    border-bottom:1px solid var(--line); background:#fbfbfd; flex:none}
-  .dr-quick .rq-lab{font-size:10.8px; color:var(--ink-2); font-weight:600; white-space:nowrap}
-  .rq-mode{display:inline-flex; gap:3px}
-  .rq-mode button{font-family:inherit; font-size:10.2px; padding:2px 7px; border-radius:999px;
-    border:1px solid var(--line); background:#fff; color:var(--ink-3); cursor:pointer; white-space:nowrap}
-  .rq-mode button.on{background:var(--ink); border-color:var(--ink); color:#fff; font-weight:600}
-  .rq-mode button:hover{background:#f4f4f5}
-  .rq-mode button.on:hover{background:#27272a}
-  .rq-seg{display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; background:#fff}
-  .rq-seg button{font-family:inherit; font-size:10.8px; padding:4px 8px; border:none; border-right:1px solid var(--line);
-    background:#fff; color:var(--ink-3); cursor:pointer; white-space:nowrap}
-  .rq-seg button:last-child{border-right:none}
-  .rq-seg button:hover{background:#f4f7fc}
-  .rq-seg button.on[data-rq-p="1"]{background:var(--red); color:#fff; font-weight:600}
-  .rq-seg button.on[data-rq-p="2"]{background:var(--brand); color:#fff; font-weight:600}
-  .rq-seg button.on[data-rq-p="3"]{background:var(--ink-3); color:#fff; font-weight:600}
-  .rq-seg button:active{transform:scale(.97)}
-  .dr-quick .rq-who{font-size:10.4px; color:var(--ink-3); max-width:160px; overflow:hidden;
-    text-overflow:ellipsis; white-space:nowrap}
-  .dr-quick input.rq-kw{flex:1 1 120px; min-width:90px; max-width:210px; font-family:inherit; font-size:11px;
-    padding:3px 7px; border:1px solid var(--line); border-radius:6px; color:var(--ink); background:#fff; outline:none}
-  .dr-quick input.rq-kw:focus{border-color:var(--brand); box-shadow:0 0 0 3px rgba(94,106,210,.12)}
-  .dr-quick .rq-sug{display:inline-flex; gap:3px; flex-wrap:wrap}
-  .dr-quick .rq-sug button{font-family:inherit; font-size:10px; padding:1px 6px; border-radius:999px;
-    border:1px dashed var(--line); background:#fff; color:var(--ink-2); cursor:pointer}
-  .dr-quick .rq-sug button:hover{border-style:solid; border-color:var(--brand); color:var(--brand)}
-  .dr-quick .rq-note{flex:1 1 100%; font-size:10px; color:var(--ink-3); line-height:1.45}
-  .dr-quick .rq-note.warn{color:#8a5320}
-  @media (max-width:760px){
-    .dr-quick{padding:7px 12px; gap:5px}
-    .dr-quick .rq-lab{flex:1 1 100%}
-    .rq-seg{flex:1 1 100%}
-    .rq-seg button{flex:1 1 0; padding:6px 2px; font-size:10.2px}
-    .dr-quick .rq-who{flex:1 1 100%; max-width:100%}
-    .dr-quick input.rq-kw{flex:1 1 100%; max-width:none}
-  }
-
   /* ---------- ⚙️ 분류 규칙 설정 ---------- */
   #rulesModal{position:fixed; inset:0; z-index:72; display:none; align-items:center; justify-content:center; padding:16px}
   #rulesModal.on{display:flex}
@@ -1353,6 +1317,9 @@
     .img-grid.single .img-cell img{max-height:240px}
     .dr-foot{padding:8px 12px; gap:6px}
     .dr-foot .sp{font-size:9.8px}
+    /* 📑 v1.2.15 — 390px 에서도 📄 메일 원문(펼침) 아래로 📝 메일 분석이 이어져 보이게 본문 박스를 더 낮춘다 */
+    .body-text{max-height:170px}
+    .dr-addr{padding:7px 9px; font-size:11px}
 
     /* ---- 모달 (브리핑 · 규칙 · 동기화) 내부 ---- */
     .bf-head .bf-ht{font-size:15px}
@@ -1508,7 +1475,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.14</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.15</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1721,7 +1688,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.14").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.15").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -4472,11 +4439,11 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     toast("커스텀 규칙을 지웠습니다 — 기본 분류로 되돌아갔습니다", 2800);
   }
 
-  /* ---------------- ⚡ 상세 패널 원클릭 분류 규칙 (v1.2.12) ----------------
-     지금 보는 메일의 발신자(또는 제목에서 뽑은 키워드)에 등급을 바로 걸어 둔다.
-     ⚙️ 분류 규칙 설정과 같은 저장소(localStorage mb_rules_v1 · 포털은 /api/state rules)를 쓰므로
-     설정 모달에서도 그대로 보이고 수정·초기화할 수 있다. */
-  const RQ = { mode: "sender", kw: "", itemId: null };
+  /* ---------------- ⚡ 분류 규칙 적용기 (v1.2.15) ----------------
+     발신자(또는 제목에서 뽑은 키워드)의 등급 규칙을 저장·적용·해제한다.
+     v1.2.12의 상세 패널 원클릭 규칙 줄은 v1.2.15에 지웠다 — 목록 행 분류 드롭다운과 같은 일을
+     두 곳에서 하던 중복이라 화면에는 행 드롭다운만 남기고, 이 적용기는 그 드롭다운이 그대로 쓴다.
+     ⚙️ 분류 규칙 설정과 같은 저장소(localStorage mb_rules_v1 · 포털은 /api/state rules)를 쓴다. */
   const RQ_STOP = ["관련", "요청", "안내", "공지", "확인", "부탁", "드립니다", "합니다", "입니다",
     "건", "메일", "회신", "전달", "자료", "내용", "정리", "보고", "검토", "진행", "일정", "변경",
     "완료", "현황", "리스트", "목록", "사항", "결과", "문의", "신청", "제출", "대한", "위한", "관한",
@@ -4534,36 +4501,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }
     return null;
   }
-  function rqQuickHtml(it) {
-    if (!it) return "";
-    if (RQ.itemId !== it.id) { RQ.itemId = it.id; RQ.mode = "sender"; RQ.kw = ""; }
-    if (!RULES) rulesLoad();
-    const isKw = RQ.mode === "kw";
-    const cands = isKw ? rqKeywordCandidates(it) : [];
-    if (isKw && !RQ.kw) RQ.kw = cands.length ? cands[0].text : "";
-    const sender = rqSender(it);
-    const act = rqRuleOf(it, RQ.mode, RQ.kw);
-    const p = act ? act.p : 0;
-    const prot = isProtectedItem(it);
-    const seg = [1, 2, 3].map((v) => '<button type="button" role="checkbox" aria-checked="' + (p === v ? "true" : "false") +
-      '" data-rq-p="' + v + '" class="' + (p === v ? "on" : "") + '">' +
-      (v === 1 ? "🔴 즉시" : v === 2 ? "🟡 흐름 참고" : "⚪ 단순 공유") + "</button>").join("");
-    const sug = (isKw && cands.length) ? '<span class="rq-sug">제안 ' + cands.slice(0, 4).map((c) =>
-      '<button type="button" data-rq-sug="' + esc(c.text) + '">' + esc(c.text) + "</button>").join("") + "</span>" : "";
-    let note;
-    if (act && p === 3 && prot) note = '<span class="rq-note warn">이 메일은 수신(To)·지목 건이라 ‘단순 공유’ 대신 ‘흐름 참고’로 보호됩니다.</span>';
-    else if (act) note = '<span class="rq-note">‘' + esc(act.text) + "’ " + (isKw ? "키워드" : "발신") + " 규칙 적용 중 · 같은 등급을 다시 누르면 해제됩니다.</span>";
-    else note = '<span class="rq-note">규칙 없음 · 기본 분류(수신 To·이름 지목 → 즉시 / 참조 CC → 흐름 참고)</span>';
-    return '<div class="dr-quick" id="drQuick">' +
-      '<span class="rq-lab">앞으로 이 메일 기준 자동 분류:</span>' +
-      '<span class="rq-mode" role="group" aria-label="규칙 기준">' +
-        '<button type="button" data-rq-mode="sender" class="' + (isKw ? "" : "on") + '" aria-pressed="' + (isKw ? "false" : "true") + '">👤 발신자</button>' +
-        '<button type="button" data-rq-mode="kw" class="' + (isKw ? "on" : "") + '" aria-pressed="' + (isKw ? "true" : "false") + '">🔤 제목 키워드</button></span>' +
-      (isKw
-        ? '<input type="text" class="rq-kw" id="rqKw" value="' + esc(RQ.kw) + '" maxlength="30" placeholder="제목 키워드 (예: 하치장)" aria-label="제목 키워드">' + sug
-        : '<span class="rq-who" title="' + esc(sender.email || "") + '">' + esc(sender.name || sender.email || "발신자 미상") + "</span>") +
-      '<span class="rq-seg" role="group" aria-label="자동 분류 등급">' + seg + "</span>" + note + "</div>";
-  }
   function rulesSnapshot() {
     if (!RULES) rulesLoad();
     return { senders: RULES.senders.map((s) => Object.assign({}, s)),
@@ -4599,14 +4536,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const b2 = $("drawerContent").querySelector(".dr-body");
     if (b2 && top) b2.scrollTop = top;
     syncActiveRows();
-  }
-  /* 상세 패널 원클릭 — 행 드롭다운과 같은 적용기(rulesApplyTo)를 쓴다 (v1.2.14) */
-  function rqSet(it, p) {
-    if (!it || !isRank(p)) return;
-    const kw = RQ.mode === "kw" ? String(RQ.kw || rqDefaultKw(it) || "") : "";
-    if (rulesApplyTo(it, p, RQ.mode, kw) === "") return;
-    refreshDrawer();
-    markP1Seen();
   }
   /* 규칙 적용기 — 행 드롭다운과 상세 원클릭이 함께 쓴다 (v1.2.14).
      같은 등급을 다시 고르면 해제하고, 직전 상태는 [실행 취소] 로 되돌린다. */
@@ -5862,12 +5791,15 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       (it.mailLink ? '<a class="mini att-open" href="' + esc(it.mailLink) + '" target="_blank" rel="noopener" title="웹메일 원문을 열어 첨부파일을 내려받습니다">웹메일 원문에서 받기 ↗</a>' : "") +
       "</div>" + attHtml + attSum;
 
-    const threadHtml = thr.length > 1
-      ? '<div class="dr-sec"><div class="sec-h">🕒 히스토리</div><details class="thread"' + (it.thread.length <= 4 ? " open" : "") + '><summary>이전 메일 ' + (thr.length - 1) + "건 타임라인 (총 " + thr.length + "건)</summary>" +
-        '<ul class="thread-list">' + thr.slice().reverse().map((m) =>
-          '<li><span class="th-date">' + esc(m.date) + '</span><span class="th-from">' + esc(m.from) + "</span>" +
-          '<span class="th-gist">' + esc(m.gist) + "</span></li>").join("") + "</ul></details></div>"
-      : "";
+    /* 🕒 히스토리 — 스레드 진행 경과(최초 → 최신). 기본 접힘, 헤더에 건수 */
+    const threadHtml = foldSec("history", "🕒 히스토리",
+      thr.length > 1 ? "· 총 " + thr.length + "건 · 이전 " + (thr.length - 1) + "건" : "· 새 스레드",
+      thr.length > 1
+        ? '<ul class="thread-list">' + thr.slice().reverse().map((m) =>
+            '<li><span class="th-date">' + esc(m.date) + '</span><span class="th-from">' + esc(m.from) + "</span>" +
+            '<span class="th-gist">' + esc(m.gist) + "</span></li>").join("") + "</ul>"
+        : '<div class="sec-none">이 메일이 스레드의 첫 메일입니다 · 이후 회신이 오면 이 자리에 시간순으로 쌓입니다.</div>',
+      { id: "drHistory" });
 
     const tbl = it.tableData;
     const tblHtml = (tbl && tbl.rows && tbl.rows.length)
@@ -5890,33 +5822,34 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="img-hint">사진을 누르면 원본 크기로 크게 볼 수 있습니다.</div>'
       : "";
 
-    /* v1.2.14 — 제목 위 상태 배지 줄(등급·수신인·회신·단계)은 지웠다. 등급은 목록 행의 분류
-       드롭다운과 아래 원클릭 규칙 줄에서 보고, 📌 고정 · ✕ 는 제목 옆에 그대로 둔다. */
+    /* v1.2.14 — 제목 위 상태 배지 줄(등급·수신인·회신·단계)은 지웠다.
+       v1.2.15 — 상단의 자동 분류(발신자·제목 키워드) 줄도 지웠다(목록 행 분류 드롭다운과 중복).
+       그래서 상세는 제목 · 📌 고정 · ✕ 바로 아래에서 📄 메일 원문부터 시작한다. */
     return '<div class="dr-head"><div style="flex:1;min-width:0">' +
         "<h2>" + esc(it.title) + "</h2></div>" +
         '<button type="button" class="dr-pin' + (isPinned(it) ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (isPinned(it) ? "true" : "false") + '" title="' +
           esc(isPinned(it) ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다 (분류·완료와 무관하게 ‘📌 고정’ 탭에 모여 있습니다)" : "📌 고정 — 원래 탭에서 ‘📌 고정’ 탭으로 옮겨 둡니다") + '">📌 ' + (isPinned(it) ? "고정됨" : "고정") + "</button>" +
         '<button class="dr-close" id="drClose" aria-label="닫기">✕</button></div>' +
-      rqQuickHtml(it) +
       '<div class="dr-body">' + backBar +
-        /* 1. 📝 메일 분석 — 기본 펼침 (가장 먼저 한눈에) */
-        foldSec("analysis", "📝 메일 분석", "", '<div class="ana-wrap">' + analysisBlock(it) + "</div>" +
-          (it.repliedNote && !stateOf(it).reply ? '<div class="att-sum" style="margin-top:6px">↩️ ' + esc(it.repliedNote) + "</div>" : ""),
+        /* 1. 📄 메일 원문 — 기본 펼침 (본문 박스는 max-height 스크롤이라 아래 분석이 한 화면에 이어진다) */
+        foldSec("origin", "📄 메일 원문",
+          "· " + esc(it.senderName || it.sender || "발신자") + " · " + esc(it.receivedAt || it.date || "") + " · 첨부 " + atts.length + "건",
+          addrBlockHtml(it) + body + imgHtml + attBlock, { id: "drOrigin", open: true, openLabel: "원문 펼치기" }) +
+        /* 2. 📝 메일 분석 — 기본 펼침 (✅ 할 일 · 💡 유사 사례 제안을 분석 안에서 함께 본다) */
+        foldSec("analysis", "📝 메일 분석", "",
+          '<div class="ana-wrap">' + analysisBlock(it) + "</div>" +
+          (it.repliedNote && !stateOf(it).reply ? '<div class="att-sum" style="margin-top:6px">↩️ ' + esc(it.repliedNote) + "</div>" : "") +
+          (rows.length ? '<div class="sub-h">✅ 할 일 <span class="cnt" data-cnt="' + it.id + '">· ' + doneCount(it) + "/" + rows.length + "</span></div>" +
+            '<ul class="todo">' + checks + "</ul>" : "") +
+          caseHintHtml(it, cases),
           { id: "drAnalysis", open: true }) +
-        /* 1-1. 💡 새·미확인 메일에 대한 과거 유사 사례 제안 (누르면 아래 🔗 섹션으로) */
-        caseHintHtml(it, cases) +
-        /* 2. 할 일 */
-        (rows.length ? '<div class="dr-sec"><div class="sec-h">✅ 할 일 <span class="cnt" data-cnt="' + it.id + '">· ' + doneCount(it) + "/" + rows.length + "</span></div><ul class=\"todo\">" + checks + "</ul></div>" : "") +
-        /* 3. 히스토리 */
+        /* 3. 🕒 히스토리 — 기본 접힘 */
         threadHtml +
         /* 4. 🔗 유사 · 과거 동일 사례 — 기본 접힘 (헤더에 건수 배지) */
         caseSectionHtml(it, cases) +
-        /* 5. ✉️ 답장 문구 제안 — 기본 접힘 */
+        /* 5. ✉️ 답장 메일 문구 제안 — 기본 접힘 */
         draft +
-        /* 6. 📄 메일 원문 — 기본 접힘 (발신자·수신시각·첨부 요약만) */
-        foldSec("origin", "📄 메일 원문",
-          "· " + esc(it.senderName || it.sender || "발신자") + " · " + esc(it.receivedAt || it.date || "") + " · 첨부 " + atts.length + "건",
-          addrBlockHtml(it) + body + imgHtml + attBlock, { openLabel: "원문 펼치기" }) +
+        /* 6. 🗒️ 내 메모 — 5번 아래 하단 보조 */
         '<div class="dr-sec"><div class="sec-h">🗒️ 내 메모</div>' +
           '<textarea class="memo" data-memo="' + it.id + '" placeholder="처리 내용·연락한 사람·특이사항 (이 기기에만 저장)">' + esc(st.memo || "") + "</textarea></div>" +
       "</div>" +
@@ -6581,30 +6514,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const ft = e.target.closest("[data-fold]");
     if (ft && !e.target.closest("button, a, input, textarea, select")) { foldToggle(ft); return; }
 
-    /* ⚡ 원클릭 분류 규칙 — 기준(발신자 ↔ 제목 키워드) 전환 · 후보 키워드 · 등급 토글 */
-    const rqm = e.target.closest("[data-rq-mode]");
-    if (rqm) {
-      e.preventDefault(); e.stopPropagation();
-      const it = byId(view.openId); if (!it) return;
-      RQ.mode = rqm.dataset.rqMode === "kw" ? "kw" : "sender";
-      if (RQ.mode === "kw" && !RQ.kw) RQ.kw = rqDefaultKw(it);
-      refreshDrawer();
-      return;
-    }
-    const rqs = e.target.closest("[data-rq-sug]");
-    if (rqs) {
-      e.preventDefault(); e.stopPropagation();
-      RQ.kw = rqs.dataset.rqSug || "";
-      refreshDrawer();
-      return;
-    }
-    const rqp = e.target.closest("[data-rq-p]");
-    if (rqp) {
-      e.preventDefault(); e.stopPropagation();
-      rqSet(byId(view.openId), Number(rqp.dataset.rqP));
-      return;
-    }
-
     /* 🔗 유사 사례 — 따라 들어가기 · 이전 메일로 돌아오기 · 제안 줄에서 섹션으로 스크롤 */
     const cj = e.target.closest("[data-case-jump]");
     if (cj) {
@@ -6756,7 +6665,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   $("drawer").addEventListener("input", (e) => {
     const t = e.target;
-    if (t.id === "rqKw") { RQ.kw = t.value; return; }   /* 원클릭 규칙의 제목 키워드 입력 */
     if (t.dataset.draftTa) {
       const it = byId(t.dataset.draftTa);
       if (!it) return;
