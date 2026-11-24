@@ -743,8 +743,9 @@
   /* ---- 답장 톤 3종 선택 ---- */
   .tone-tabs{display:flex; gap:4px; margin-bottom:7px; min-width:0; padding:2px; background:var(--gray-weak); border-radius:8px}
   .tone-btn{flex:1 1 0; min-width:0; padding:5px 4px; border-radius:6px; border:1px solid transparent;
-    background:transparent; color:var(--ink-2); font-size:11px; line-height:1.4; cursor:pointer;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background .12s, border-color .12s, color .12s, box-shadow .12s}
+    background:transparent; color:var(--ink-2); font-size:11px; line-height:1.35; cursor:pointer;
+    white-space:normal; word-break:keep-all; text-align:center; overflow:hidden;
+    transition:background .12s, border-color .12s, color .12s, box-shadow .12s}
   .tone-btn:hover{color:var(--ink)}
   .tone-btn.on{background:#fff; border-color:var(--line); color:var(--ink); font-weight:600; box-shadow:0 1px 2px rgba(9,9,11,.06)}
   textarea.draft-body{display:block; width:100%; border:0; resize:vertical; min-height:170px; font-family:inherit;
@@ -4392,7 +4393,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       if (attLine) mid.push(attLine);
       if (bullets) mid.push(bullets);
       else if (c) mid.push(c);
-      mid.push((ext ? "첨부한 파일 확인 부탁드리며, " : "첨부한 파일 확인 부탁드리고, ") + ask);
+      mid.push((ext ? (atts.length ? "첨부한 파일 확인 부탁드리며, " : "확인 부탁드리며, ")
+                    : (atts.length ? "첨부한 파일 확인 부탁드리고, " : "확인 부탁드리고, ")) + ask);
     } else if (k === "result") {
       mid.push("요청하신 " + topic + mbJosa(topic, "을", "를") + " 확인한 결과 공유드립니다.");
       if (bullets) mid.push(bullets);

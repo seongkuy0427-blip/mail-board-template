@@ -2148,7 +2148,10 @@ def build_reply_drafts(item: dict, core: str = "") -> dict:
         body.append(bullets)
     elif core:
         body.append(core)
-    body.append(("첨부한 파일 확인 부탁드리며, " + ask_ext) if ext else ("첨부한 파일 확인 부탁드리고, " + ask_int))
+    if ext:
+        body.append(("첨부한 파일 확인 부탁드리며, " if atts else "확인 부탁드리며, ") + ask_ext)
+    else:
+        body.append(("첨부한 파일 확인 부탁드리고, " if atts else "확인 부탁드리고, ") + ask_int)
     attach = head + "\n\n".join(body) + sign
 
     body = [f"요청하신 {topic}{obj} 확인한 결과 공유드립니다."]
