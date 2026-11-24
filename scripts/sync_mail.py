@@ -1802,6 +1802,217 @@ def to_includes_us(mail: dict, contacts: dict | None = None) -> bool:
     return False
 
 
+# ── 결론 문구 · 주담당 교차 판별 (v1.2.13) ────────────────────────────
+#  사용자 확정: "본문 확인 후 회신" 같은 상투어 금지 · 일이 없다는 식의 짧은 마무리도 금지.
+#  결론은 [구체적 행위 + 대상/품번·기준 + 회신 대상자·형태] 로 쓴다.
+ACTION_BANNED = (
+    "본문 요청 내용 확인 후 회신", "본문 확인 후 회신", "본문 확인 후 조치",
+    "본문 요청 확인", "내용 확인 후 회신",
+)
+#  "할 일이 없다"는 식의 짧은 마무리도 금지 — 이유와 다음 행동을 적는다.
+ACTION_BANNED_RE = re.compile(r"할\s*일\s*없|볼\s*일\s*없")
+
+# 타 부서 업무 신호 — 본문이 이쪽 중심이면 주담당을 우리 팀으로 올리지 않는다
+OTHER_DEPT_RULES: tuple[tuple[str, str], ...] = (
+    ("해외물류부", r"해외물류|선적|부킹|booking|B/L|\bBL\b|통관|포워더|선복|항공|해상|컨테이너"),
+    ("조달물류팀", r"조달물류|도입자재|도입\s*요청|발주|구매"),
+    ("영업부", r"영업|수주|판매|딜러"),
+    ("제조부", r"제조|생산라인|라인\s*가동|공정\s*이관"),
+    ("안전보건팀", r"안전보건|안전점검|위험성|산업안전|규정\s*위반"),
+    ("경영지원팀", r"경영지원|인사|총무|회계|급여|근태|특근"),
+    ("품질팀", r"품질|불량|클레임|재작업"),
+)
+OUR_WORK_RE = re.compile(r"납입|출하|재고|실사|보급|서열|PTR|EOP|용기|결품|미상차|입고", re.I)
+
+
+def _mail_text(mail: dict) -> str:
+    return f"{mail.get('subject') or mail.get('title') or ''}\n{mail.get('bodyText') or ''}"
+
+
+def _other_dept_hit(mail: dict, contacts: dict | None = None) -> tuple[str, int]:
+    """본문·제목에서 가장 강하게 드러나는 타 부서와 그 신호 수."""
+    text = _mail_text(mail)
+    addrs = [*(mail.get("to") or []), *(mail.get("cc") or [])]
+    depts = [str(((contacts or {}).get(_addr_email(a)) or {}).get("dept") or "") for a in addrs]
+    best, best_score = "", 0
+    for label, pat in OTHER_DEPT_RULES:
+        hits = re.findall(pat, text, re.I)
+        if not hits:
+            continue
+        score = len(hits)
+        stem = re.sub(r"(부|팀|실|본부)$", "", label)
+        if stem and any(stem in d for d in depts):
+            score += 2
+        if score > best_score:
+            best, best_score = label, score
+    return best, best_score
+
+
+def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
+    """수신(To)/참조(CC) 위치 · 본문 지목 · 회신 요청 대상 · 업무 키워드를 교차해 주담당을 정한다."""
+    contacts = contacts or {}
+    text = _mail_text(mail)
+    to_me = _is_to(mail)
+    in_to = to_includes_us(mail, contacts)
+    mentioned = text_mentions_us(mail)
+    if not mentioned:                       # 본문이 우리 팀원을 직접 부른 경우도 우리 건이다
+        for m in our_members(contacts):
+            nm = str(m.get("name") or "").strip()
+            if len(nm) >= 2 and nm in text:
+                mentioned = True
+                break
+    our_hits = len(OUR_WORK_RE.findall(text))
+    other, other_score = _other_dept_hit(mail, contacts)
+    label = our_dept_label()
+    # 본문이 타 부서 업무 중심이고 우리 팀 지목도, 우리 업무 신호도 없으면 주담당을 넘긴다
+    other_main = bool(other) and other_score >= 2 and not mentioned and our_hits == 0
+    ours = (to_me or in_to or mentioned) and not other_main
+    if ours:
+        main = label
+    elif other:
+        main = f"{other}(주담당) · 우리 부서({label})는 참조"
+    else:
+        main = "확인 필요(주담당 부서 미상)"
+    if ours and mentioned:
+        basis = "본문·제목에서 우리 부서/이름이 직접 지목됨"
+    elif ours and to_me:
+        basis = "우리 팀이 수신(To) · 본문 요청 대상도 우리 업무 범위"
+    elif ours:
+        basis = "우리 팀이 수신(To)에 포함 · 본문 요청도 우리 업무 범위"
+    elif other:
+        where = "수신(To)에 우리 팀 없이 참조(CC)만" if not in_to else "수신(To)에 있으나"
+        basis = f"{where} · 본문 요청·업무 키워드가 {other} 중심"
+    else:
+        basis = "참조(CC)만 있고 본문 지목이 없어 주담당 판별 어려움 — 원문 확인 권장"
+    return {"to_me": to_me, "in_to": in_to, "mentioned": mentioned,
+            "ours": ours, "other": other if not ours else "",
+            "main": main, "basis": basis}
+
+
+_DUE_WEEK = "월화수목금토일"
+
+
+def _due_phrase(due: str, text: str) -> str:
+    """2026-11-25 + 본문의 `07:00`/`07시` → `11/25(수) 07:00`."""
+    m = re.match(r"(20\d{2})-(\d{2})-(\d{2})", str(due or ""))
+    if not m:
+        return ""
+    try:
+        wd = _DUE_WEEK[dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).weekday()]
+    except ValueError:
+        return ""
+    when = f"{int(m.group(2))}/{int(m.group(3))}({wd})"
+    t = re.search(r"(?<!\d)(\d{1,2})\s*:\s*(\d{2})(?!\d)", str(text or ""))
+    if t:
+        when += f" {int(t.group(1)):02d}:{t.group(2)}"
+    else:
+        t2 = re.search(r"(?<!\d)(\d{1,2})\s*시", str(text or ""))
+        if t2:
+            when += f" {int(t2.group(1)):02d}시"
+    return when
+
+
+def _date_phrase(text: str) -> str:
+    """`11/24(화) 07:00 기준` 처럼 '기준·까지'가 붙은 날짜를 결론 문구용으로 뽑는다."""
+    s = str(text or "")
+    for m in re.finditer(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*\(([월화수목금토일])\))?", s):
+        around = s[max(0, m.start() - 26):m.end() + 26]
+        tail0 = s[m.end():m.end() + 12]
+        near_clock = bool(re.search(r"^\s*(?:\d{1,2}\s*[:시])", tail0))
+        if "기준" not in around and "까지" not in around and not near_clock:
+            continue
+        mm, dd = int(m.group(1)), int(m.group(2))
+        if not (1 <= mm <= 12 and 1 <= dd <= 31):
+            continue
+        wd = m.group(3) or _DUE_WEEK[dt.date(dt.date.today().year, mm, dd).weekday()]
+        tail = s[m.end():m.end() + 12]
+        t = re.search(r"(?<!\d)(\d{1,2})\s*:\s*(\d{2})(?!\d)", tail)
+        clock = f" {int(t.group(1)):02d}:{t.group(2)}" if t else ""
+        if not clock:
+            t2 = re.search(r"(?<!\d)(\d{1,2})\s*시", tail)
+            if t2:
+                clock = f" {int(t2.group(1)):02d}시"
+        return f"{mm}/{dd}({wd}){clock}"
+    return ""
+
+
+def _request_target(mail: dict) -> str:
+    """무엇을 요청받았는지 — 제목에서 날짜 꼬리를 떼고 품번을 붙인다."""
+    title = str(mail.get("subject") or mail.get("title") or "")
+    body = clean_body(mail.get("bodyText") or "")
+    t = re.sub(r"^(?:re|fw|fwd|답장|전달)\s*[:：]\s*", "", title.strip(), flags=re.I)
+    t = re.sub(r"[\s_\-]*\d{1,2}\s*[/.\-]\s*\d{1,2}\s*(?:\([월화수목금토일]\))?\s*(?:\d{1,2}\s*[:시].*)?$", "", t)
+    t = re.sub(r"\s*\[[^\]]{0,20}\]\s*$", "", t).strip(" _-·")
+    codes: list[str] = []
+    for m in re.finditer(r"(?<!\d)(\d{6,10})(?!\d)", f"{title}\n{body}"):
+        c = m.group(1)
+        if re.match(r"20\d{6}", c) or c in codes:
+            continue
+        codes.append(c)
+        if len(codes) >= 2:
+            break
+    target = _clip(t or title, 46) or "요청 건"
+    if codes:
+        target = f"{target}({', '.join(codes)})"
+    return target
+
+
+def concrete_actions(mail: dict, contacts: dict | None = None, *, ruling: dict | None = None) -> tuple[str, str]:
+    """[구체적 행위 + 대상/품번 + 회신 대상자] 형태의 (우리 부서 할 일, 내 할 일)."""
+    ruling = ruling or dept_ruling(mail, contacts)
+    target = _request_target(mail)
+    who = _sender_phrase(mail, contacts) or "요청자"
+    text = _mail_text(mail)
+    due = _due_phrase(deadline_date(text, mail.get("date") or mail.get("receivedAt") or ""), text) or _date_phrase(text)
+    when = f"{due}까지 " if due else ""
+    if ruling.get("ours"):
+        our = f"[직접 회신 필요] {target} 확인·정리 → {when}{who}에게 결과 회신"
+        if ruling.get("to_me"):
+            my = f"[직접 회신 필요] {target} 담당 확인 후 {when}{who}에게 회신"
+        elif ruling.get("mentioned") or ruling.get("in_to"):
+            my = f"[참조 · {target} 건 업무 흐름 파악 (팀 회신 여부 확인)]"
+        else:
+            my = "[참조 · 업무 흐름 파악 (별도 회신 불필요)]"
+    else:
+        dept = ruling.get("other") or "주담당 부서"
+        our = f"[직접 조치 없음 · 타 부서({dept}) 주담당 · 참조 흐름 파악 필요]"
+        my = "[타 부서 주담당 건 · 참조 모니터링 (확인 처리 권장)]"
+    return our, my
+
+
+def _share_actions(mail: dict) -> tuple[str, str]:
+    """⚪ 단순 공유 — 일이 없더라도 이유와 참조 범위를 업무적인 표현으로 남긴다."""
+    target = _request_target(mail)
+    return (f"[직접 조치 없음 · {target} 일상 공유 · 참조 흐름 파악]",
+            "[참조 · 업무 흐름 파악 (별도 회신 불필요)]")
+
+
+def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> dict:
+    """AI 가 상투어·일이 없다는 식의 마무리를 냈거나 주담당을 잘못 올렸으면 바로잡는다."""
+    ruling = dept_ruling(mail, contacts)
+    fb_our, fb_my = concrete_actions(mail, contacts, ruling=ruling)
+    our = str(result.get("ourDeptAction") or "").strip()
+    my = str(result.get("myAction") or "").strip()
+    bad = lambda t: (not t) or any(b in t for b in ACTION_BANNED) or bool(ACTION_BANNED_RE.search(t))
+    if bad(our):
+        our = fb_our
+    if bad(my):
+        my = fb_my
+    main = str(result.get("mainDept") or "").strip()
+    mine = our_dept_tokens(contacts) or [our_dept_label()]
+    if ruling["other"] and not ruling["ours"] and (not main or any(tok and tok in main for tok in mine)):
+        main = ruling["main"]
+        result["deptBasis"] = ruling["basis"]
+    result["ourDeptAction"] = our
+    result["myAction"] = my
+    result["mainDept"] = main or ruling["main"]
+    if not str(result.get("deptBasis") or "").strip():
+        result["deptBasis"] = ruling["basis"]
+    if result.get("replyStatus") == "needs_reply" and not (ruling["to_me"] and ruling["ours"]):
+        result["replyStatus"] = "no_reply_needed"
+    return result
+
+
 def thread_cache_key(title: str) -> str:
     key = _norm_title(title or "")
     return key or str(title or "").strip().lower()
@@ -1893,8 +2104,8 @@ def skip_analysis(mail: dict, reason: str = "simple_share") -> dict:
         "aiSkipReason": reason,
         "mainDept": "확인 필요(단순 공유)",
         "deptBasis": "출하리스트·납입요청 등 현장 일상 공유로 분류(수신·참조 위치만)",
-        "ourDeptAction": "[없음 (단순 공유 · 참고만)]",
-        "myAction": "[할 일 없음(확인 처리 권장)]",
+        "ourDeptAction": _share_actions(mail)[0],
+        "myAction": _share_actions(mail)[1],
         "timeline": [timeline_line(mail, None, head)],
         "analysisBody": analysis_body(mail)[:4000],
     }
@@ -1911,6 +2122,8 @@ def light_analysis(mail: dict, contacts: dict | None = None) -> dict:
     who = _sender_phrase(mail, contacts) or (mail.get("from_raw") or "발신자")
     rcpt = _recipient_phrase(mail, contacts, _is_to(mail))
     summary = f"{LIGHT_TAG} {who} → {rcpt}" + (f" : {head}" if head else "")
+    _light_ruling = dept_ruling(mail, contacts)
+    _light_actions = concrete_actions(mail, contacts, ruling=_light_ruling)
     return {
         "summary": summary,
         "headline": head,
@@ -1925,10 +2138,10 @@ def light_analysis(mail: dict, contacts: dict | None = None) -> dict:
         "replyDrafts": {},
         "aiSkipped": True,
         "aiSkipReason": "other_dept",
-        "mainDept": "타 부서(주담당) · 우리 부서는 참조",
-        "deptBasis": f"우리 부서({our_dept_label()})가 수신(To)에 없고 본문 지목도 없음",
-        "ourDeptAction": "[없음 (타 부서 주담당 · 단순 참조)]",
-        "myAction": "[할 일 없음(확인 처리 권장)]",
+        "mainDept": _light_ruling["main"],
+        "deptBasis": _light_ruling["basis"],
+        "ourDeptAction": _light_actions[0],
+        "myAction": _light_actions[1],
         "timeline": [timeline_line(mail, contacts, head)],
         "analysisBody": analysis_body(mail)[:4000],
     }
@@ -1966,9 +2179,11 @@ def analysis_input_text(mail: dict, kind: str = "받은편지함", *, contacts: 
     return "\n".join(lines)
 
 
-def normalize_analysis(result: dict, mail: dict, cache: dict | None = None) -> dict:
+def normalize_analysis(result: dict, mail: dict, cache: dict | None = None,
+                        contacts: dict | None = None) -> dict:
     """AI 응답을 화면 형식으로 정리한다 — 3단 고정 조립, 타임라인 보존, 빠진 필드 보완."""
     out = dict(result or {})
+    out = polish_actions(out, mail, contacts)          # 상투어·일이 없다는 마무리·주담당 오판정 교정 (v1.2.13)
     timeline = [str(x).strip() for x in (out.get("timeline") or []) if str(x).strip()]
     if cache and cache.get("timeline"):
         old = [str(t) for t in cache["timeline"] if str(t).strip()]
@@ -1999,14 +2214,14 @@ def _run_ai(gem, mail: dict, kind: str, contacts: dict | None, cache: dict | Non
             if isinstance(stats, dict):
                 stats["gemini_calls"] = int(stats.get("gemini_calls") or 0) + 1
             res = gem.analyze(mail, kind=kind, contacts=contacts, cache=cache, brief=brief)
-            return normalize_analysis(res, mail, cache)
+            return normalize_analysis(res, mail, cache, contacts)
         except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
             # 로그가 공개될 수 있으므로 메일 제목·본문은 오류 문구에 넣지 않는다
             msg = f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}: {str(e)[:160]}"
             if isinstance(stats, dict):
                 stats.setdefault("warnings", []).append(msg)
             print(f"  ! {msg}", file=sys.stderr)
-    return normalize_analysis(heuristic_analysis(mail, _is_to(mail), contacts, cache=cache), mail, cache)
+    return normalize_analysis(heuristic_analysis(mail, _is_to(mail), contacts, cache=cache), mail, cache, contacts)
 
 
 def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict | None = None,
@@ -2257,14 +2472,26 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
 
 [mainDept / deptBasis — 2) 주담당 부서 판별]
 - mainDept: 실제 요청을 받은 부서(또는 사람). 예) "해외물류부(선적·통관)", "조달물류팀", "납입관리부(납입1팀)", "협력사 OO".
-- deptBasis: 그 판단 근거 1줄 — 수신(To) vs 참조(CC) 위치, 본문에서 지목한 이름/부서, 이전 회신자 서명·각인, 업무 성격.
+- deptBasis: 그 판단 근거 1줄 — 수신(To) vs 참조(CC) 위치, 본문에서 지목한 이름/부서, 회신 요청 상대, 이전 회신자 서명·각인, 업무 키워드.
+- **수신(To)에 우리 팀이 들어 있다는 사실만으로 우리 팀 주담당이라고 쓰지 않는다.** 본문에서 실제 요청·회신을 받는
+  부서/사람이 따로 있으면(예: 선적·통관→해외물류부, 도입·발주→조달물류팀, 생산·공정→제조부, 인사·급여→경영지원팀)
+  mainDept 는 그 부서로 쓴다. 우리 팀이 참조(CC)로만 있고 본문 지목도 없으면 replyStatus 는 no_reply_needed.
 - [사내 조직 컨텍스트] 의 부서 매핑을 적극적으로 쓴다. "나"가 속한 부서가 우리 부서다.
 
 [ourDeptAction / myAction — 3) 결론]
-- ourDeptAction: `[직접 조치/회신 필요] …` 또는 `[없음 (타 부서 주담당 · 단순 참조)]` 중 하나로 결론짓고,
-  할 일이 있으면 구체적인 액션과 기한을 적는다.
-- myAction: `[직접 회신 필요] …` / `[팀원(이름) 처리 팔로업] …` / `[할 일 없음(확인 처리 권장)]` 중 하나로 쓴다.
-  본문 지목 여부와 관리자 검토 필요 여부로 판단한다.
+- **금지 문구**: "본문 요청 내용 확인 후 회신", "본문 확인 후 회신", "본문 확인 후 조치", "본문 요청 확인",
+  "내용 확인 후 회신" 같은 두루뭉술한 상투어. **맡은 일이 없다는 뜻의 짧은 마무리도 절대 쓰지 않는다.**
+  할 일이 없으면 왜 없는지(타 부서 주담당·단순 공유)와 무엇을 계속 볼지(참조 흐름·모니터링)를 적는다.
+- ourDeptAction: [구체적 행위 + 대상/품번·기준 + 회신 대상자·형태] 가 드러나게 한 줄로 쓴다.
+  · 직접 할 일이 있으면 `[직접 회신 필요] 11/25(수) 07시 기준 2품번(13524683·13540045) 재고조사 결과 정리 → 요청자(유광승 과장)에게 회신`
+    처럼 날짜·품번·수량·회신 대상을 원문 값으로 넣는다.
+  · 우리 부서 일이 아니면 `[직접 조치 없음 · 타 부서(해외물류부) 주담당 · 참조 흐름 파악 필요]`
+    또는 `[타 부서(해외물류부) 진행 건 · 납입 영향 여부 모니터링]`.
+- myAction: 나(수신자) 개인 기준 한 줄.
+  · 내가 회신·조치할 건: `[직접 회신 필요] 서열자재 보급 기준 첫차·마지막 차량 PO 확인 후 요청자에게 회신`
+  · 참조만 된 건: `[참조 · 업무 흐름 파악 (별도 회신 불필요)]` 또는 `[타 부서 주담당 건 · 참조 모니터링 (확인 처리 권장)]`.
+- **주담당 판별 규칙**: 본문에서 실제 회신을 요구받은 대상이 다른 부서·다른 담당자면, 그 건은
+  `[직접 조치 없음 · 타 부서(OOO) 주담당 · …]` 으로 결론내고 replyStatus·actionItems 도 우리 팀 기준으로 비운다.
 
 [headline]
 - 목록·검색에 쓰는 한 줄(60자 이내). "누가 → 무엇을 요청" 형태. 3단 요약을 다시 쓰지 않는다.
@@ -2965,17 +3192,11 @@ def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None,
         if reason and reason not in line_gist:
             line_gist = f"{line_gist} ({reason})"
         timeline = [timeline_line(mail, contacts, line_gist)]
-    mentioned = text_mentions_us(mail)
-    label = our_dept_label()
-    ours = to_me or to_includes_us(mail, contacts) or mentioned
-    main_dept = label if ours else "확인 필요(타 부서 가능)"
-    basis = ("우리 부서(팀)가 수신(To)" if to_me
-             else "본문·제목에서 우리 부서/이름 지목" if mentioned
-             else "우리 부서(팀)가 수신(To)에 포함" if ours
-             else "수신(To)·참조(CC) 위치만으로는 판별 어려움 — 원문 확인 권장")
-    our_action = ("[직접 회신 필요] 본문 요청 내용 확인 후 회신" if (to_me or ours)
-                  else "[없음 (타 부서 주담당 · 단순 참조)]")
-    my_action = "[직접 회신 필요] 본문 요청 확인" if to_me else "[할 일 없음(확인 처리 권장)]"
+    ruling = dept_ruling(mail, contacts)
+    main_dept = ruling["main"]
+    basis = ruling["basis"]
+    our_action, my_action = concrete_actions(mail, contacts, ruling=ruling)
+    needs_reply = bool(ruling["to_me"] and ruling["ours"])
     return {
         "summary": compose_analysis(timeline, main_dept, basis, our_action, my_action),
         "headline": _clip(gist or first or title, 60),
@@ -2988,7 +3209,7 @@ def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None,
         "dueDate": due,
         "deadline": (deadline_label(due) if due
                      else ("별도 회신 기한 없음" if not to_me else "확인 필요")),
-        "replyStatus": "needs_reply" if to_me else "no_reply_needed",
+        "replyStatus": "needs_reply" if needs_reply else "no_reply_needed",
         "category": cat,
         "urgency": "normal",
         "threadGist": gist or (first or title)[:60],

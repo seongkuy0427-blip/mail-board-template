@@ -841,6 +841,39 @@ def run(pin: str, keep: bool) -> int:
           not res_to.get("aiSkipped") and len(gem_calls2) == 1, str(res_to.get("aiSkipReason")))
     sm.set_custom_rules({})       # 뒤 테스트로 규칙이 새지 않게
 
+    # v1.2.13 — 결론은 구체적으로 · 일이 없다는 마무리 금지 · 주담당 교차 판별
+    ct = {ME_ADDR.lower(): {"name": ME_NAME, "title": ME_TITLE, "dept": ME_DEPT},
+          "ryu@chunil.co.kr": {"name": "류광종", "title": "과장", "dept": "해외물류부"},
+          "johhee.yeom@gm.com": {"name": "염주희", "title": "차장", "dept": "GM"}}
+    eop2 = {"subject": "EOP자재 재고실사 요청_11/24(화) 07시",
+            "bodyText": "하기 품번 명일 07:00 기준 재고실사 요청드립니다.\n42711726 HOUSING AS",
+            "date": "2026-11-23 16:30", "from_raw": "염주희 <johhee.yeom@gm.com>",
+            "from_email": "johhee.yeom@gm.com", "to": [f"{ME_NAME} <{ME_ADDR}>"], "cc": []}
+    h2 = sm.heuristic_analysis(eop2, True, ct)
+    check("결론 — 품번·기한·회신 대상이 들어간 구체적 행동",
+          h2["ourDeptAction"].startswith("[직접 회신 필요]") and "42711726" in h2["ourDeptAction"]
+          and "염주희" in h2["ourDeptAction"] and "11/24(화) 07시" in h2["ourDeptAction"]
+          and "본문 확인" not in h2["ourDeptAction"], h2["ourDeptAction"])
+    check("일이 없다는 식의 짧은 마무리 미사용",
+          not sm.ACTION_BANNED_RE.search(h2["myAction"]), h2["myAction"])
+    ov2 = {"subject": "12월 선복 부킹 확정 공유",
+           "bodyText": "선복 부킹과 통관 일정 확인 부탁드립니다.",
+           "date": "2026-11-24 08:10", "from_raw": "류광종 <ryu@chunil.co.kr>",
+           "from_email": "ryu@chunil.co.kr",
+           "to": ["해외물류부 <overseas@chunil.co.kr>"], "cc": [f"{ME_NAME} <{ME_ADDR}>"]}
+    lt2 = sm.light_analysis(ov2, ct)
+    check("타 부서 참조 — 직접 조치 없음으로 결론",
+          lt2["ourDeptAction"].startswith("[직접 조치 없음") and "해외물류부" in lt2["ourDeptAction"]
+          and lt2["replyStatus"] == "no_reply_needed", lt2["ourDeptAction"])
+    mix2 = dict(ov2, subject="12월 선적 스케줄 협의",
+                to=[f"{ME_NAME} <{ME_ADDR}>", "해외물류부 <overseas@chunil.co.kr>"], cc=[])
+    mx = sm.heuristic_analysis(mix2, True, ct)
+    check("To에 우리 팀이 있어도 본문 요청이 타 부서면 넘긴다",
+          "해외물류부" in mx["mainDept"] and mx["ourDeptAction"].startswith("[직접 조치 없음")
+          and mx["replyStatus"] == "no_reply_needed", f"{mx['mainDept']} / {mx['ourDeptAction']}")
+    check("프롬프트에 구체적 결론 규칙·금지 문구", "금지 문구" in sm.SYSTEM_PROMPT
+          and "구체적 행위 + 대상/품번·기준" in sm.SYSTEM_PROMPT
+          and not sm.ACTION_BANNED_RE.search(sm.SYSTEM_PROMPT))
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)
