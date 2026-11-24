@@ -953,6 +953,75 @@ def run(pin: str, keep: bool) -> int:
     check("스레드 병합 — 수신 구분도 최신 메일(To)을 따라간다",
           merged.get("recipientRole") == "To" and merged.get("priority") == 1,
           f"{merged.get('recipientRole')}/{merged.get('priority')}")
+
+    # ─────────────────────────────────────────────────────────── v1.2.18
+    #  [object Object] · 웹메일 메뉴 첨부 · [Begin] 마커 · 히스토리 중복 · To 타인 + 우리팀 CC 오판정
+    menu = ["메일", "일정관리", "주소록", "환경설정", "개인정보", "김성규", "로그보기", "로그아웃", "편지쓰기",
+            "내게쓰기", "안읽음 1", "중요", "수신확인", "대용량 첨부", "전체메일 1", "관리", "받은편지함 4",
+            "임시보관함 4", "지운편지함", "비움", "스팸편지함", "스팸메일 설정", "POP3 이용안내",
+            "SMTP/POP3 문제해결", "리턴메일 분석", "로그인"]
+    menu_html = ("<html><body><div class='side'><ul>" +
+                 "".join(f'<li><a href="/mail_list.php?x={i}">{n}</a></li>' for i, n in enumerate(menu)) +
+                 '</ul></div><table><tr><td id="mf_body_view">본문</td></tr></table></body></html>')
+    menu_atts = sm.parse_read(menu_html)["attachments"]
+    check("웹메일 메뉴 26종은 첨부가 아니다(v1.2.18)", menu_atts == [], str(menu_atts)[:60])
+    att_page = read_page(date="2026-11-24 12:27", frm="조승환 <jsh3117@chunil.co.kr>",
+                         to=["김성규 <kimpro@chunil.co.kr>"], cc=[], subject="첨부 확인 부탁",
+                         body="첨부 확인 부탁드립니다.",
+                         attach=[("1123 1340.xlsx", "57.58K"), ("도면.pdf", "120.1K")])
+    att_names = [a["name"] for a in sm.parse_read(att_page)["attachments"]]
+    check("실제 첨부는 이름·용량 그대로 읽는다(v1.2.18)",
+          att_names == ["1123 1340.xlsx", "도면.pdf"], str(att_names))
+    dirty = [{"id": "m-dirty", "attachments": [{"name": n, "size": ""} for n in menu] + [{"name": "a.xlsx", "size": "1 KB"}]}]
+    removed = sm.clean_attachments(dirty)
+    check("이미 저장된 웹메일 메뉴 첨부를 정리한다(v1.2.18)",
+          removed == len(menu) and [a["name"] for a in dirty[0].get("attachments") or []] == ["a.xlsx"],
+          f"{removed} / {dirty[0].get('attachments')}")
+
+    begin_page = read_page(date="2026-11-24 12:27", frm="김세유 <seyu@chunil.co.kr>",
+                           to=["김성규 <kimpro@chunil.co.kr>"], cc=[], subject="[Begin] 제목 확인",
+                           body="<!-- [Begin]상단 디자인 -->[Begin] 메일 본문 하고 <!-- [End] -->참조 바랍니다")
+    begin_read = sm.parse_read(begin_page)
+    check("[Begin]/[End] 파싱 마커가 본문·제목에 남지 않는다(v1.2.18)",
+          "[Begin]" not in begin_read["bodyText"] and "[End]" not in begin_read["bodyText"]
+          and "[Begin]" not in begin_read["subject"],
+          repr(begin_read["bodyText"][:60]))
+
+    dup = {"id": "m-dup", "receivedAt": "2026-11-24 12:27",
+           "thread": [{"id": "m-5418517", "date": "2026-11-24 12:27", "from": "김세유 과장",
+                       "gist": "FW: 13G 하치장 로컬 휴게실 상단 미사용 실외기 철거 요청 관련_260904"}] * 12}
+    check("히스토리 12줄 중복을 1줄로 병합(v1.2.18)",
+          sm.dedup_all_threads([dup]) == 11 and len(dup["thread"]) == 1, str(len(dup["thread"])))
+    check("스레드에 병합된 번호도 기준선에 들어간다(v1.2.18)",
+          sm.max_mf_no({"items": [{"id": "m-5418000", "thread": [{"id": "m-5418517"}]}]}) == 5418517)
+    same = {"id": "m-1", "thread": [{"id": "m-5418517", "date": "2026-11-24 12:27", "from": "김세유 과장", "gist": "x"}]}
+    sm.merge_into_thread(same, {"thread": [{"id": "m-5418517", "date": "2026-11-24 12:27", "from": "김세유 과장", "gist": "x"}],
+                                "priority": 2, "priorityReason": "", "replyStatus": "no_reply_needed"})
+    check("같은 메일을 다시 병합해도 한 줄(v1.2.18)", len(same["thread"]) == 1, str(len(same["thread"])))
+
+    fw = {"mf_no": 990918, "subject": "FW: 13G 하치장 로컬 휴게실 상단 미사용 실외기 철거 요청 관련_260904",
+          "bodyText": ("[Begin] 메일 본문 하고 참조 바랍니다.\n\n------Original Message------\n"
+                       "From: Jaeyeong Bae (배재영 - 롯데온 ) <jaeyeong.bae@lotteon.com>\n"
+                       "13G 하치장 로컬 휴게실 상단 미사용 실외기 철거 요청드립니다.\n\n"
+                       "납입1팀 과장 김성규\n"),
+          "from_raw": "김세유 <seyu@chunil.co.kr>", "from_email": "seyu@chunil.co.kr",
+          "date": "2026-11-24 12:27", "to": ["서유태 <seota@chunil.co.kr>"],
+          "cc": ["김성규 <kimpro@chunil.co.kr>", "김기경 <kkg@chunil.co.kr>"]}
+    fw_ruling = sm.dept_ruling(fw, contacts)
+    check("To 가 타인·우리 팀은 CC — 인용·서명에 이름이 보여도 우리 부서 직접 회신으로 단정하지 않는다(v1.2.18)",
+          fw_ruling["ours"] is False and "납입1팀" not in fw_ruling["main"].split("(주담당)")[0],
+          f"{fw_ruling['main']} / ours={fw_ruling['ours']}")
+    fw_actions = sm.concrete_actions(fw, contacts, ruling=fw_ruling)
+    check("To 가 타인인 참조 건의 결론은 직접 조치 없음(v1.2.18)",
+          fw_actions[0].startswith("[직접 조치 없음"), fw_actions[0])
+    fw_polished = sm.polish_actions({"mainDept": "납입관리부(납입1팀)", "ourDeptAction": "[직접 회신 필요] 결과 회신",
+                                     "myAction": "[참조 · 업무 흐름 파악]", "replyStatus": "needs_reply",
+                                     "actionItems": ["결과 회신"]}, fw, contacts)
+    check("AI 가 우리 팀 직접 회신으로 써도 결론·회신 필요를 바로잡는다(v1.2.18)",
+          fw_polished["ourDeptAction"].startswith("[직접 조치 없음")
+          and fw_polished["replyStatus"] == "no_reply_needed" and not fw_polished["actionItems"],
+          f"{fw_polished['ourDeptAction']} / {fw_polished['replyStatus']}")
+
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)

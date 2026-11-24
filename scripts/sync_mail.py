@@ -57,7 +57,7 @@ import unicodedata
 from typing import Any
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -956,8 +956,24 @@ class Nmail:
 _DATE_RE = re.compile(r"(\d{2}|\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})")
 
 
+PARSE_MARK_RE = re.compile(r"\[\s*(?:BEGIN|END)\s*\]\s*", re.I)
+
+
+def strip_parse_marks(text: str) -> str:
+    """웹메일 HTML 주석이 본문으로 새어 들어온 `[Begin]`·`[End]` 파싱 마커를 걷어낸다 (v1.2.18).
+
+    Nmail 편지읽기 화면은 `<!-- [Begin]상단 디자인 -->` 같은 주석을 본문 요소 안에 둔다.
+    예전 파서는 주석까지 글자로 읽어 본문·제목·요약 앞에 `[Begin]` 이 그대로 붙었다.
+    이미 저장된 본문도 동기화할 때 이 함수로 정리된다.
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    return PARSE_MARK_RE.sub("", s)
+
+
 def _clean(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").replace("\xa0", " ")).strip()
+    return re.sub(r"\s+", " ", strip_parse_marks(text).replace("\xa0", " ")).strip()
 
 
 def _norm_addr(raw: str) -> str:
@@ -1251,18 +1267,119 @@ def _att_image_name(name: str) -> bool:
     return bool(_ATT_IMG_RE.search((name or "").strip()))
 
 
+# 웹메일 화면의 사이드바·상단 메뉴 — 첨부파일이 아니다 (v1.2.18 사용자 신고: 첨부 0건인데 26건으로 표시)
+WEBMAIL_UI_NAMES = {
+    "메일", "일정관리", "주소록", "환경설정", "개인정보", "로그보기", "로그아웃", "편지쓰기", "내게쓰기",
+    "안읽음", "중요", "수신확인", "대용량첨부", "전체메일", "관리", "받은편지함", "보낸편지함",
+    "임시보관함", "지운편지함", "비움", "스팸편지함", "스팸메일설정", "pop3이용안내",
+    "smtp/pop3문제해결", "리턴메일분석", "pop3", "smtp", "리턴메일", "로그인", "사용자정보",
+}
+# 실제 첨부 내려받기 주소 — 편지읽기·다운로드 링크만 첨부로 본다
+ATT_DOWNLOAD_RE = re.compile(r"(mail_attach_down|include/download\.php|file_down|attach_down|mail_down\.php)", re.I)
+
+
+def is_webmail_ui_name(name: str) -> bool:
+    """`안읽음 1`·`받은편지함 4` 처럼 건수만 붙은 웹메일 메뉴 이름인가 (v1.2.18)."""
+    raw = _clean(name)
+    if not raw:
+        return False
+    key = re.sub(r"\s*\d+\s*$", "", raw)
+    key = re.sub(r"[\s·ㆍ()\[\]]", "", key).lower()
+    if not key:
+        return False
+    if key in WEBMAIL_UI_NAMES:
+        return True
+    if re.match(r"^(?:pop3|smtp|리턴메일)", key):
+        return True
+    if re.search(r"(?:이용안내|문제해결)$", key):
+        return True
+    me = _clean(OWNER.get("name") or "")
+    if me and key in {me.lower(), re.sub(r"[\s·ㆍ()\[\]]", "", me).lower()}:
+        return True                     # 로그인 사용자 이름만 달랑 있는 메뉴 줄
+    return False
+
+
+def _att_name_ok(name: str, size: str = "", url: str = "") -> bool:
+    """첨부로 볼 만한 이름인가 — 메뉴 이름·빈 이름·확장자도 용량도 주소도 없는 줄은 버린다."""
+    raw = _clean(name)
+    if not raw:
+        return False
+    if is_webmail_ui_name(raw):
+        return False
+    if not re.search(r"\.[A-Za-z0-9]{1,6}$", raw) and not _clean(size) and not str(url or "").strip():
+        return False
+    return True
+
+
+def clean_attachment_list(atts: list) -> list[dict]:
+    """저장된 첨부 목록을 같은 규칙으로 정리한다(웹메일 메뉴·빈 칩·같은 파일명 중복 제거)."""
+    out: list[dict] = []
+    seen: dict[str, dict] = {}
+    for a in atts or []:
+        if not isinstance(a, dict):
+            continue
+        name = _clean(a.get("name") or "")
+        size = _clean(a.get("size") or "")
+        url = str(a.get("url") or "").strip()
+        if not _att_name_ok(name, size, url):
+            continue
+        key = re.sub(r"\s+", " ", name).strip().lower()
+        prev = seen.get(key)
+        if prev is not None:
+            if not prev.get("size") and size:
+                prev["size"] = size
+            if not prev.get("url") and url:
+                prev["url"] = url
+            continue
+        rec: dict = {"name": name, "size": size}
+        if url:
+            rec["url"] = url
+        if a.get("dataUrl"):
+            rec["dataUrl"] = a["dataUrl"]
+        seen[key] = rec
+        out.append(rec)
+    return out
+
+
+def clean_attachments(items: list[dict], *, limit: int = 0) -> int:
+    """이미 저장된 첨부 목록에서 웹메일 메뉴 이름·빈 칩을 걷어낸다 (v1.2.18).
+
+    네트워크 없이 저장분만 정리하므로, 첨부가 없는데 메뉴 26종이 붙어 있던 메일도
+    다음 동기화 한 번에 `첨부파일 · 0건`으로 바로잡힌다.
+    """
+    fixed = 0
+    for it in items or []:
+        atts = it.get("attachments")
+        if not isinstance(atts, list) or not atts:
+            continue
+        kept = clean_attachment_list(atts)
+        if len(kept) < len(atts):
+            fixed += len(atts) - len(kept)
+            if kept:
+                it["attachments"] = kept
+            else:
+                it.pop("attachments", None)
+        if limit and fixed >= limit:
+            break
+    return fixed
+
+
 def _parse_attachments(soup) -> list[dict]:
     """편지읽기 페이지의 첨부 목록 → [{name, size, url?}]
 
-    · 파일명이 빈 <a>(아이콘 전용 다운로드 버튼)는 첨부가 아니라 버튼이라 버린다.
-      (2026-11-24 사용자 신고 — 첨부 3건인데 빈 [📎] 칩 3개가 함께 떠 6건으로 보임)
+    · 첨부 영역(`.mf_attach_names_wrap`)이 없으면 첨부 0건이다. 예전에는 페이지 전체에서 `li a` 를
+      훑어, 첨부가 없는 메일이면 웹메일 사이드바 메뉴(메일·일정관리·주소록 … 26종)를 첨부로 읽었다
+      (v1.2.18 사용자 신고 — `첨부파일 · 26건`).
+    · 파일명이 빈 <a>(아이콘 전용 다운로드 버튼)·웹메일 메뉴 이름은 첨부가 아니라 버튼·메뉴라 버린다.
     · 같은 파일명이 두 번 나오면 한 번만 남기고, 비어 있던 크기·주소는 채워 넣는다.
     · url 은 첨부 내려받기 주소(mail.chunil.co.kr) — 포털이 사진 썸네일을 중계할 때 쓴다.
     """
     out: list[dict] = []
     seen: dict[str, dict] = {}
-    wrap = soup.select_one("td.mf_attach_names_wrap") or soup
-    for a in wrap.select("li a"):
+    wrap = soup.select_one(".mf_attach_names_wrap")
+    if wrap is None:
+        return out
+    for a in wrap.select("a"):
         size_el = a.select_one("span.mf_attach_name_size")
         size = _clean(size_el.get_text(" ", strip=True)) if size_el else ""
         if size_el:
@@ -1273,13 +1390,13 @@ def _parse_attachments(soup) -> list[dict]:
             title = _clean(a.get("title") or "")
             title = re.sub(r"^(다운로드|첨부\s*다운로드|내려받기|미리보기)\s*", "", title).strip()
             name = title if title and not re.search(r"(다운로드|내려받기|미리보기)$", title) else ""
-        if not name:
-            continue
         href = (a.get("href") or "").strip()
         if href.startswith("/"):
             href = BASE + href
         if not href.startswith("http") or "javascript:" in href:
             href = ""
+        if not _att_name_ok(name, size, href):
+            continue
         key = re.sub(r"\s+", " ", name).strip().lower()
         prev = seen.get(key)
         if prev is not None:
@@ -1484,6 +1601,8 @@ def el_text(el: Any) -> str:
     parts: list[str] = []
 
     def walk(node: Any) -> None:
+        if isinstance(node, Comment):
+            return                                        # <!-- [Begin] … --> 주석은 본문 글자가 아니다 (v1.2.18)
         name = getattr(node, "name", None)
         if name is None:                                  # NavigableString
             parts.append(str(node))
@@ -1518,7 +1637,7 @@ def el_text(el: Any) -> str:
     walk(el)
     raw = "".join(parts).replace("\u00a0", " ")
     raw = re.sub(r"[\n\x01\x02\x03]+", _one_break, raw)
-    return join_body_text(raw).strip()
+    return strip_parse_marks(join_body_text(raw)).strip()
 
 
 def clean_body(text: str) -> str:
@@ -1894,33 +2013,107 @@ def _other_dept_hit(mail: dict, contacts: dict | None = None) -> tuple[str, int]
     return best, best_score
 
 
+REQUEST_VERB_RE = re.compile(r"(요청|회신|송부|확인|검토|정리|조치|제출|보고|부탁|전달|작성|반영|처리|진행)")
+
+
+def _fresh_body(mail: dict) -> str:
+    """발신자가 이번에 새로 쓴 본문 — 인용 머리말(──── Original Message ────)과 서명 뒤는 뺀다.
+
+    `strip_quoted` 는 앞 60자 안의 인용 머리말을 건너뛰므로(본문 첫 줄의 'From:' 오인 방지),
+    짧은 전달 메일은 첫 줄부터 인용이 시작되는 경우가 많다. 여기서는 인용 머리말이 나오면
+    그 앞까지만 새 본문으로 본다 (v1.2.18).
+    """
+    text = str(mail.get("bodyText") or "")
+    low = text.lower()
+    cut = len(text)
+    for marker in QUOTE_MARKERS:
+        idx = low.find(marker)
+        if idx > 0:
+            cut = min(cut, idx)
+    return strip_signature(text[:cut].strip())
+
+
+def _directed_at_us(text: str, contacts: dict | None = None) -> bool:
+    """새 본문에서 우리 부서·팀원을 '요청' 문맥으로 직접 불렀는가 (v1.2.18).
+
+    전달·참조 메일의 인용문이나 서명에 우리 팀 이름·팀원 이름이 스쳐 나오는 것과 구분하려고,
+    이름 앞뒤 45자 안에 요청 동사(요청·회신·확인·부탁 …)가 함께 있어야 인정한다.
+    """
+    body = str(text or "")
+    if not body:
+        return False
+    needles: set[str] = set()
+    for tok in our_dept_tokens(contacts or {}):
+        if tok and len(tok) >= 2:
+            needles.add(tok)
+    label = our_dept_label()
+    if label:
+        needles.add(label)
+    my_name = str(OWNER.get("name") or "").strip()
+    if len(my_name) >= 2:
+        needles.add(my_name)
+    for m in our_members(contacts or {}):
+        nm = str(m.get("name") or "").strip()
+        if len(nm) >= 2:
+            needles.add(nm)
+    for needle in needles:
+        for hit in re.finditer(re.escape(needle), body):
+            window = body[max(0, hit.start() - 45): hit.end() + 45]
+            if REQUEST_VERB_RE.search(window):
+                return True
+    return False
+
+
+def _first_to_label(mail: dict, contacts: dict | None = None) -> str:
+    """받는사람(To) 첫 사람 — `해외물류부 류광종 과장 (chunil.co.kr)` 처럼 부서까지 붙인 한 줄."""
+    me = (OWNER.get("email") or ME or "").lower()
+    for raw in mail.get("to") or []:
+        email = _addr_email(raw)
+        if email and email == me:
+            continue
+        label = person_label(raw, contacts or {})
+        if label:
+            return label
+    return ""
+
+
 def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
-    """수신(To)/참조(CC) 위치 · 본문 지목 · 회신 요청 대상 · 업무 키워드를 교차해 주담당을 정한다."""
+    """수신(To)/참조(CC) 위치 · 본문 지목 · 회신 요청 대상 · 업무 키워드를 교차해 주담당을 정한다.
+
+    v1.2.18 — 발신자가 To 를 다른 담당자·부서로 보내고 우리 팀은 참조(CC)에만 있는 전달·공유 건은,
+    인용문·서명에 우리 팀 이름이 스쳐 나온다는 이유만으로 `주담당: 납입1팀`·`[직접 회신 필요]` 로
+    결론내지 않는다. 새로 쓴 본문에서 우리 팀·팀원을 직접 요청한 경우에만 우리 건으로 본다.
+    """
     contacts = contacts or {}
     text = _mail_text(mail)
+    fresh = _fresh_body(mail)
     to_me = _is_to(mail)
     in_to = to_includes_us(mail, contacts)
-    mentioned = text_mentions_us(mail)
+    mentioned = _directed_at_us(fresh, contacts)
     if not mentioned:                       # 본문이 우리 팀원을 직접 부른 경우도 우리 건이다
         for m in our_members(contacts):
             nm = str(m.get("name") or "").strip()
-            if len(nm) >= 2 and nm in text:
+            if len(nm) >= 2 and nm in fresh and REQUEST_VERB_RE.search(fresh):
                 mentioned = True
                 break
+    quoted_mention = text_mentions_us(mail) or mentioned
     our_hits = len(OUR_WORK_RE.findall(text))
     other, other_score = _other_dept_hit(mail, contacts)
     label = our_dept_label()
     # 본문이 타 부서 업무 중심이고 우리 팀 지목도, 우리 업무 신호도 없으면 주담당을 넘긴다
     other_main = bool(other) and other_score >= 2 and not mentioned and our_hits == 0
     ours = (to_me or in_to or mentioned) and not other_main
+    to_label = "" if ours else _first_to_label(mail, contacts)
     if ours:
         main = label
     elif other:
         main = f"{other}(주담당) · 우리 부서({label})는 참조"
+    elif to_label:
+        main = f"{to_label}(주담당) · 우리 부서({label})는 참조"
     else:
         main = "확인 필요(주담당 부서 미상)"
     if ours and mentioned:
-        basis = "본문·제목에서 우리 부서/이름이 직접 지목됨"
+        basis = "본문에서 우리 부서/이름이 직접 요청 대상으로 지목됨"
     elif ours and to_me:
         basis = "우리 팀이 수신(To) · 본문 요청 대상도 우리 업무 범위"
     elif ours:
@@ -1928,10 +2121,14 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
     elif other:
         where = "수신(To)에 우리 팀 없이 참조(CC)만" if not in_to else "수신(To)에 있으나"
         basis = f"{where} · 본문 요청·업무 키워드가 {other} 중심"
+    elif to_label:
+        basis = ("발신자가 수신(To)을 다른 담당자에게 보내고 우리 팀은 참조(CC)만"
+                 + (" · 인용·서명에 우리 팀 이름이 보이지만 새 본문에 직접 요청은 없음" if quoted_mention else ""))
     else:
         basis = "참조(CC)만 있고 본문 지목이 없어 주담당 판별 어려움 — 원문 확인 권장"
     return {"to_me": to_me, "in_to": in_to, "mentioned": mentioned,
-            "ours": ours, "other": other if not ours else "",
+            "ours": ours, "other": (other or (to_label if to_label else "")) if not ours else "",
+            "other_kind": ("dept" if other else ("person" if (to_label and not ours) else "")),
             "main": main, "basis": basis}
 
 
@@ -2021,7 +2218,11 @@ def concrete_actions(mail: dict, contacts: dict | None = None, *, ruling: dict |
             my = "[참조 · 업무 흐름 파악 (별도 회신 불필요)]"
     else:
         dept = ruling.get("other") or "주담당 부서"
-        our = f"[직접 조치 없음 · 타 부서({dept}) 주담당 · 참조 흐름 파악 필요]"
+        if ruling.get("other_kind") == "person":
+            # 수신(To) 사람만 알 때 — 부서가 같은 팀일 수도 있으니 '타 부서'로 단정하지 않는다 (v1.2.18)
+            our = f"[직접 조치 없음 · 수신(To) {dept} 담당 · 참조 흐름 파악 필요]"
+        else:
+            our = f"[직접 조치 없음 · 타 부서({dept}) 주담당 · 참조 흐름 파악 필요]"
         my = "[타 부서 주담당 건 · 참조 모니터링 (확인 처리 권장)]"
     return our, my
 
@@ -2040,13 +2241,19 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
     our = str(result.get("ourDeptAction") or "").strip()
     my = str(result.get("myAction") or "").strip()
     bad = lambda t: (not t) or any(b in t for b in ACTION_BANNED) or bool(ACTION_BANNED_RE.search(t))
-    if bad(our):
-        our = fb_our
-    if bad(my):
-        my = fb_my
+    if ruling["ours"]:
+        if bad(our):
+            our = fb_our
+        if bad(my):
+            my = fb_my
+    else:
+        # v1.2.18 — 우리 부서 일이 아니면 AI 가 ‘[직접 회신 필요]’로 써도 결론·할 일을 우리 팀 기준으로 바로잡는다
+        our, my = fb_our, fb_my
+        if result.get("actionItems"):
+            result["actionItems"] = []
     main = str(result.get("mainDept") or "").strip()
     mine = our_dept_tokens(contacts) or [our_dept_label()]
-    if ruling["other"] and not ruling["ours"] and (not main or any(tok and tok in main for tok in mine)):
+    if not ruling["ours"] and (not main or any(tok and tok in main for tok in mine)):
         main = ruling["main"]
         result["deptBasis"] = ruling["basis"]
     result["ourDeptAction"] = our
@@ -2054,7 +2261,8 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
     result["mainDept"] = main or ruling["main"]
     if not str(result.get("deptBasis") or "").strip():
         result["deptBasis"] = ruling["basis"]
-    if result.get("replyStatus") == "needs_reply" and not (ruling["to_me"] and ruling["ours"]):
+    # v1.2.18 — 우리 부서 일이 아니면(참조만·타 담당자 주담당) 회신 필요를 남기지 않는다
+    if result.get("replyStatus") == "needs_reply" and not ruling["ours"]:
         result["replyStatus"] = "no_reply_needed"
     return result
 
@@ -2547,6 +2755,11 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
 - **수신(To)에 우리 팀이 들어 있다는 사실만으로 우리 팀 주담당이라고 쓰지 않는다.** 본문에서 실제 요청·회신을 받는
   부서/사람이 따로 있으면(예: 선적·통관→해외물류부, 도입·발주→조달물류팀, 생산·공정→제조부, 인사·급여→경영지원팀)
   mainDept 는 그 부서로 쓴다. 우리 팀이 참조(CC)로만 있고 본문 지목도 없으면 replyStatus 는 no_reply_needed.
+- **발신자가 To 를 다른 담당자·다른 부서로 지정하고 우리 팀은 참조(CC)에만 있으면, 우리 팀 이름·팀원 이름이
+  인용문·서명·이전 회신에 스쳐 나오더라도 주담당을 우리 팀으로 올리지 않는다.** 새로 쓴 본문에서 우리 팀·팀원에게
+  직접 요청한 문장(예: "납입1팀 확인 부탁드립니다", "김성규 과장님 회신 부탁드립니다")이 있을 때만 직접 회신으로 본다.
+  그 외에는 mainDept 를 실제 요청받은 담당자/부서로 쓰고 `[직접 조치 없음 · 타 부서(OOO) 주담당 · 참조 흐름 파악 필요]`,
+  replyStatus 는 no_reply_needed 로 결론낸다.
 - [사내 조직 컨텍스트] 의 부서 매핑을 적극적으로 쓴다. "나"가 속한 부서가 우리 부서다.
 
 [ourDeptAction / myAction — 3) 결론]
@@ -3414,11 +3627,64 @@ def find_thread_target(items: list[dict], title: str, received: str, *, days: in
     return best
 
 
+def dedup_thread(thread: list) -> list:
+    """스레드 줄에서 같은 메일(id)·같은 (분 단위 시각, 발신자, 제목) 중복을 1건으로 병합한다 (v1.2.18).
+
+    같은 메일이 동기화마다 다시 병합되면 같은 줄이 12번씩 쌓였다(2026-11-24 사용자 신고).
+    반환값은 시간순으로 정렬된 새 목록이다.
+    """
+    out: list[dict] = []
+    by_id: dict[str, dict] = {}
+    by_key: dict[tuple[str, str, str], dict] = {}
+    for entry in thread or []:
+        if not isinstance(entry, dict):
+            continue
+        rec = dict(entry)
+        eid = str(rec.get("id") or "").strip()
+        key = (str(rec.get("date") or "").replace("T", " ").strip()[:16],
+               re.sub(r"\s+", " ", str(rec.get("from") or "")).strip(),
+               _norm_title(str(rec.get("gist") or "")))
+        prev = (by_id.get(eid) if eid else None) or by_key.get(key)
+        if prev is not None:
+            if not prev.get("link") and rec.get("link"):
+                prev["link"] = rec["link"]
+            if len(str(rec.get("gist") or "")) > len(str(prev.get("gist") or "")):
+                prev["gist"] = rec["gist"]
+            if eid:
+                by_id[eid] = prev
+            by_key.setdefault(key, prev)
+            continue
+        if eid:
+            by_id[eid] = rec
+        by_key[key] = rec
+        out.append(rec)
+    out.sort(key=lambda m: str(m.get("date") or ""))
+    return out
+
+
+def dedup_all_threads(items: list[dict]) -> int:
+    """이미 쌓인 히스토리 중복을 정리한다 — 동기화마다 1회 (v1.2.18). 정리한 줄 수를 돌려준다."""
+    merged = 0
+    for it in items or []:
+        thr = it.get("thread")
+        if not isinstance(thr, list) or len(thr) < 2:
+            continue
+        clean = dedup_thread(thr)
+        if len(clean) >= len(thr):
+            continue
+        merged += len(thr) - len(clean)
+        it["thread"] = clean
+        last = max([str(m.get("date") or "") for m in clean] + [str(it.get("receivedAt") or "")])[:16]
+        if last:
+            it["lastAt"] = last
+    return merged
+
+
 def merge_into_thread(item: dict, new_item: dict) -> None:
     """새 메일을 기존 항목의 스레드에 덧붙이고, 최신 메일 기준으로 앞면을 갱신한다."""
     entry = dict(new_item["thread"][0])
     item.setdefault("thread", []).append(entry)
-    item["thread"].sort(key=lambda m: str(m.get("date") or ""))
+    item["thread"] = dedup_thread(item["thread"])
     item["lastAt"] = max([str(m.get("date") or "") for m in item["thread"]] + [item.get("receivedAt") or ""])[:16]
     # v1.2.14 — 최신 메일이 나를 수신(To)으로 지정했으면 항목의 수신 구분도 따라 올린다
     #           (옛 코드는 등급만 올려 ‘수신인(To)’ 배지와 등급이 어긋났다)
@@ -3513,18 +3779,31 @@ def apply_sent_reply(items: list[dict], sent: dict, analysis: dict, contacts: di
         "gist": "회신 발송" + (f" — {analysis.get('threadGist')}" if analysis.get("threadGist") else ""),
         "link": sent["mailLink"],
     })
-    target["thread"].sort(key=lambda m: str(m.get("date") or ""))
+    target["thread"] = dedup_thread(target["thread"])
     target["lastAt"] = max([str(m.get("date") or "") for m in target["thread"]] + [target.get("receivedAt") or ""])[:16]
     return target
 
 
 # ────────────────────────────────────────────────────────────── 동기화 본체
 def max_mf_no(data: dict) -> int:
+    """이미 받아 둔 가장 큰 메일 번호 — 스레드에 병합된 회신·발신 번호까지 본다 (v1.2.18).
+
+    예전에는 항목(id)만 보아, 스레드에 병합된 회신은 기준선을 올리지 못했다.
+    그래서 같은 메일을 동기화마다 새 메일로 다시 읽어 히스토리에 12줄씩 쌓였다.
+    """
     best = 0
-    for it in data.get("items") or []:
-        m = re.fullmatch(r"[msa]-(\d+)", str(it.get("id") or ""))
+
+    def bump(value: Any) -> None:
+        nonlocal best
+        m = re.fullmatch(r"[msa]-(\d+)", str(value or ""))
         if m:
             best = max(best, int(m.group(1)))
+
+    for it in data.get("items") or []:
+        bump(it.get("id"))
+        for entry in it.get("thread") or []:
+            if isinstance(entry, dict):
+                bump(entry.get("id"))
     return best
 
 
@@ -3593,8 +3872,15 @@ def sync(args: argparse.Namespace) -> dict:
     to_repaired = repair_to_priority(items)
     if to_repaired:
         report["toRepaired"] = to_repaired
+    # v1.2.18 — 새 메일이 없어도 ① 쌓인 히스토리 중복 ② 웹메일 메뉴가 첨부로 붙은 기록을 정리한다
+    hist_merged = dedup_all_threads(items)
+    att_cleaned = clean_attachments(items)
+    if hist_merged:
+        report["historyMerged"] = hist_merged
+    if att_cleaned:
+        report["attachmentsCleaned"] = att_cleaned
     if (not inbox and not sent and not is_new and not contacts_added
-            and not drafts_refreshed and not to_repaired):
+            and not drafts_refreshed and not to_repaired and not hist_merged and not att_cleaned):
         report["changed"] = False
         return report
 
@@ -3645,7 +3931,8 @@ def sync(args: argparse.Namespace) -> dict:
     if drafts_refreshed:                      # 옛 답장 초안 3종 → 실무형 3안 (v1.2.8)
         report["draftsRefreshed"] = drafts_refreshed
     changed = bool(refreshed or drafts_refreshed or added or report["replied"] or contacts_added
-                   or to_repaired or att_fixed or any(m.get("merged_into") for m in report["new_inbox"]))
+                   or to_repaired or att_fixed or hist_merged or att_cleaned
+                   or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
     report["changed"] = changed
