@@ -2785,8 +2785,9 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (k === "p1") { view.kpi = ""; view.tab = "p1"; Object.assign(view, reset); msg = "🔴 즉시 확인 목록으로 이동했습니다"; }
     else if (k === "fu") { view.kpi = ""; view.tab = "fu"; Object.assign(view, reset); msg = "⏳ 미회신 추적 탭으로 이동했습니다"; }
     else if (k === "d3" || k === "today" || k === "reply") {
-      /* today·reply 는 v1.2.9 이전 카드 이름 — 브리핑 등 남은 호출도 같은 목록으로 보낸다 */
-      const on = view.kpi === "d3" || ((k === "today" || k === "reply") && view.kpi !== "d3");
+      /* D-3 카드는 누를 때마다 켜고 끈다. today·reply 는 v1.2.9 이전 카드 이름이라
+         브리핑 등 남은 호출은 늘 D-3 목록으로 보낸다. */
+      const on = k === "d3" ? view.kpi !== "d3" : true;
       view.kpi = on ? "d3" : ""; Object.assign(view, reset);
       if (view.kpi && k === "reply") view.replyOnly = true;
       msg = view.kpi ? "⏰ D-3 마감 " + d3Build().total + "건" + (view.replyOnly ? " 중 회신 필요만" : "") + " 모아 봅니다" : "⏰ D-3 마감 필터를 해제했습니다";
