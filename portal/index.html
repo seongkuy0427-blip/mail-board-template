@@ -180,12 +180,6 @@
     color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;
     transition:background .12s, border-color .12s, color .12s}
   .icon-btn:hover{background:#fafafa; border-color:#d4d4d8; color:var(--ink)}
-  /* 🔔 옆의 작은 '알림 테스트' 버튼 */
-  .notif-test{height:30px; padding:0 10px; border-radius:7px; border:1px solid var(--line); background:#fff; cursor:pointer;
-    display:inline-flex; align-items:center; justify-content:center; gap:4px; font-size:11.5px; font-weight:500;
-    color:var(--ink-2); white-space:nowrap; transition:background .12s, border-color .12s, color .12s}
-  .notif-test:hover{background:#fafafa; border-color:#d4d4d8; color:var(--ink)}
-  .notif-test:active{transform:scale(.97)}
   .spin{animation:sp .9s linear infinite; display:inline-block}
   @keyframes sp{to{transform:rotate(360deg)}}
 
@@ -683,8 +677,6 @@
   /* 📑 v1.2.15 — 제목·📌·✕ 바로 아래에서 첫 섹션(📄 메일 원문)이 시작되도록 위 여백만 줄인다 */
   .dr-body>.dr-sec.fold:first-child, .dr-body>.dr-backbar+.dr-sec.fold{padding-top:7px}
   .sec-none{font-size:11.3px; color:var(--ink-3); line-height:1.55}
-  /* 💡 분석 안으로 들어온 과거 유사 사례 제안 줄 — 섹션 여백 안에서 한 줄로 */
-  .dr-sec .case-hint{margin:9px 0 0}
   .dr-sec{padding:12px 16px; border-bottom:1px solid var(--line-2)}
   .dr-sec:last-child{border-bottom:none}
   .sec-h{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--ink-2); margin-bottom:7px; letter-spacing:-.01em}
@@ -780,10 +772,6 @@
     color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:7px; padding:4px 9px; cursor:pointer}
   .dr-backbtn:hover{background:#fafafa; border-color:#d4d4d8}
   .dr-backfrom{flex:1; min-width:0; font-size:10.8px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .case-hint{display:block; width:auto; text-align:left; font-family:inherit; font-size:11.6px; line-height:1.5; color:var(--brand);
-    background:var(--brand-weak); border:1px solid #dcdef5; border-radius:8px; padding:7px 10px; margin:0 16px 10px; cursor:pointer}
-  .case-hint:hover{background:#eceefa; border-color:#cdd2f2}
-  .case-hint .case-hint-ex{color:var(--ink-2); font-weight:500}
   .case-list{display:flex; flex-direction:column; gap:5px}
   .case-row{display:block; width:100%; text-align:left; font-family:inherit; padding:8px 10px; background:#fff;
     border:1px solid var(--line); border-radius:8px; cursor:pointer; transition:background .12s, border-color .12s}
@@ -867,6 +855,22 @@
   #lightbox .lb-close{position:absolute; top:12px; right:12px; width:34px; height:34px; border-radius:50%; border:none;
     background:rgba(255,255,255,.18); color:#fff; font-size:16px; cursor:pointer}
   #lightbox .lb-cap{position:absolute; left:0; right:0; bottom:10px; text-align:center; color:#fff; font-size:11.5px; opacity:.8}
+  /* ◀ ▶ — 사진이 여러 장일 때만 보인다(v1.2.17) */
+  #lightbox .lb-nav{position:absolute; top:50%; transform:translateY(-50%); width:40px; height:40px; border-radius:50%;
+    border:none; background:rgba(255,255,255,.18); color:#fff; font-size:15px; cursor:pointer; line-height:1}
+  #lightbox .lb-nav:hover{background:rgba(255,255,255,.32)}
+  #lightbox .lb-nav[hidden]{display:none}
+  #lightbox .lb-prev{left:10px}
+  #lightbox .lb-next{right:10px}
+  /* 📷 사진 첨부 썸네일 (v1.2.17) — 파일명·크기를 아래에 얹는다 */
+  .att-grid{margin:0 0 6px}
+  .att-cell{cursor:zoom-in}
+  .att-cell .zoom{bottom:20px}
+  .att-cell .att-cap{position:absolute; left:0; right:0; bottom:0; padding:3px 6px 4px; font-size:9.7px; line-height:1.35;
+    color:#fff; background:linear-gradient(180deg,rgba(9,9,11,0),rgba(9,9,11,.7)); text-align:left;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .att-cell .att-cap i{font-style:normal; opacity:.78; margin-left:4px}
+  .att-img-hint{margin:0 0 2px}
   .icon-btn.ring{color:#fff; border-color:rgba(255,255,255,.42); background:rgba(41,98,255,.55)}
   .icon-btn.ring.off{color:rgba(255,255,255,.45)}
   .reply-row{display:flex; gap:5px; flex-wrap:wrap}
@@ -897,9 +901,15 @@
   .memo{width:100%; min-height:48px; resize:vertical; font-size:12.2px; padding:8px 9px; border:1px solid var(--line); border-radius:8px; font-family:inherit; color:var(--ink-2); background:#fff; outline:none}
   .memo:focus{border-color:var(--brand); box-shadow:0 0 0 3px rgba(94,106,210,.12)}
   .status-sel{padding:6px 8px; border:1px solid var(--line); border-radius:7px; font-size:11.5px; background:#fff; color:var(--ink-2)}
-  .dr-foot{display:flex; align-items:center; gap:7px; padding:10px 16px; border-top:1px solid var(--line); background:#fafafa; flex-wrap:wrap; flex:none}
+  /* v1.2.17 — 회신 상태 / 진행 상태 두 줄. ‘웹메일 원본 ↗’은 오른쪽 끝 한 곳뿐이다 */
+  .dr-foot{display:flex; flex-direction:column; align-items:stretch; gap:6px; padding:9px 16px 10px;
+    border-top:1px solid var(--line); background:#fafafa; flex:none}
+  .dr-foot .ft-row{display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0}
+  .dr-foot .ft-lab{flex:none; min-width:52px; font-size:10.5px; font-weight:700; color:var(--ink-3); letter-spacing:-.01em}
   .dr-foot .reply-row{flex:1 1 auto}
-  .dr-foot .sp{margin-left:auto; font-size:10.3px; color:var(--ink-3)}
+  .dr-foot .status-sel{flex:none}
+  .dr-foot .ft-origin{margin-left:auto; white-space:nowrap}
+  .dr-foot .sp{font-size:10.3px; color:var(--ink-3)}
   /* ---------- ⚙️ 분류 규칙 설정 ---------- */
   #rulesModal{position:fixed; inset:0; z-index:72; display:none; align-items:center; justify-content:center; padding:16px}
   #rulesModal.on{display:flex}
@@ -1309,13 +1319,13 @@
     .thread-list .th-date{min-width:62px; font-size:9.8px}
     .thread-list .th-from{max-width:76px}
     .dr-backbar{padding:7px 12px}
-    .case-hint{margin:0 12px 8px}
     .case-row{padding:7px 9px}
     .case-ttl{font-size:11.8px}
     .img-grid{gap:5px}
     .img-cell img{max-height:180px}
     .img-grid.single .img-cell img{max-height:240px}
-    .dr-foot{padding:8px 12px; gap:6px}
+    .dr-foot{padding:8px 12px; gap:5px}
+    .dr-foot .ft-lab{min-width:46px; font-size:9.9px}
     .dr-foot .sp{font-size:9.8px}
     /* 📑 v1.2.15 — 390px 에서도 📄 메일 원문(펼침) 아래로 📝 메일 분석이 이어져 보이게 본문 박스를 더 낮춘다 */
     .body-text{max-height:170px}
@@ -1519,7 +1529,6 @@
         <div class="sync" id="sync">마지막 동기화<br><b>-</b></div>
         <button class="icon-btn cloud-btn" id="cloudBtn" title="PC·모바일 상태 동기화" aria-label="PC·모바일 상태 동기화"><span>☁️</span><i class="cy-dot"></i></button>
         <button class="icon-btn" id="bellBtn" title="새 메일 알림 켜기" aria-label="새 메일 알림">🔔</button>
-        <button class="notif-test" id="notifTestBtn" title="브라우저 알림 팝업이 뜨는지 바로 테스트" aria-label="알림 테스트">🔔 알림 테스트</button>
         <button class="brief-btn" id="briefBtn" title="오늘의 업무 브리핑 — 간밤 새 메일·오늘 마감·회신 대기" aria-label="오늘의 업무 브리핑 열기"><span>☀️</span><span class="bf-t">브리핑</span></button>
 
         <button class="icon-btn" id="refreshBtn" title="새로고침" aria-label="새로고침">↻</button>
@@ -1540,7 +1549,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.16</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.17</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1769,7 +1778,9 @@
 </div>
 <div id="lightbox" role="dialog" aria-modal="true" aria-label="사진 크게 보기">
   <button class="lb-close" id="lbClose" aria-label="닫기">✕</button>
+  <button class="lb-nav lb-prev" id="lbPrev" aria-label="이전 사진">◀</button>
   <img id="lbImg" alt="">
+  <button class="lb-nav lb-next" id="lbNext" aria-label="다음 사진">▶</button>
   <div class="lb-cap" id="lbCap"></div>
 </div>
 
@@ -1781,7 +1792,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.16").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.17").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -2384,40 +2395,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }
     return true;
   }
-  /* 상단 '알림 테스트' — OS 팝업이 막혀 있어도 상단 카드·탭 제목 깜빡임이 뜨는지 바로 확인 */
-  async function testNotification() {
-    /* 1) OS 알림과 무관하게 항상 뜨는 알림 */
-    startTitleFlash("테스트 — 이 탭 제목이 깜빡이면 정상입니다");
-    showAlertBanner("🔔 알림 테스트",
-      "이 상단 카드와 탭 제목 깜빡임은 Windows 알림이 차단되어도 항상 뜹니다. 실제 새 메일이 오면 같은 방식으로 알려드립니다.", null);
-    /* 2) 브라우저 팝업(지원·허용되는 경우에만) */
-    let why = "";
-    let popupOk = false;
-    if (!("Notification" in window)) {
-      why = "이 브라우저는 팝업 알림 미지원";
-    } else {
-      let perm = Notification.permission;
-      if (perm === "default") { try { perm = await Notification.requestPermission(); } catch (e) { perm = "denied"; } }
-      if (perm !== "granted") { why = "브라우저·Windows 알림 차단"; }
-      else {
-        try {
-          const n = new Notification("🔴 새 즉시 확인 메일 (테스트)", { body: "알림 팝업이 정상 작동합니다!", tag: "mb-test", renotify: true });
-          n.onclick = () => { try { window.focus(); } catch (e) {} n.close(); };
-          popupOk = true;
-        } catch (e) { why = "팝업 표시 실패"; }
-      }
-    }
-    if (popupOk) {
-      /* 팝업이 정상이면 새 메일 알림도 켜 둔다(🔔을 다시 누르면 꺼짐) */
-      const turnedOn = !bellOn();
-      if (turnedOn) { try { LSK.setItem(LS.bell, "1"); } catch (e) {} }
-      paintBell();
-      toast("테스트 알림을 보냈습니다 · 상단 카드와 탭 제목 깜빡임도 함께 뜹니다" + (turnedOn ? " · 새 메일 알림도 켜 두었습니다" : ""), 3600);
-    } else {
-      paintBell();
-      toast("팝업은 " + why + " — 대신 상단 카드·탭 제목으로 알려드립니다", 4200);
-    }
-  }
   async function toggleBell() {
     if (bellOn()) { try { LSK.setItem(LS.bell, "0"); } catch (e) {} paintBell(); toast("새 메일 팝업 알림을 껐습니다 (화면 알림은 계속)"); return; }
     if (!("Notification" in window)) { try { LSK.setItem(LS.bell, "1"); } catch (e) {} paintBell(); toast("이 브라우저는 팝업 알림을 지원하지 않아 화면 토스트로 알려드립니다"); return; }
@@ -2428,15 +2405,40 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     toast(perm === "granted" ? "새 즉시 확인 메일이 오면 팝업으로 알려드립니다" : "브라우저 알림이 차단되어 화면 토스트로만 알려드립니다 (주소창 자물쇠 → 알림 허용)");
   }
 
-  /* ---------------- 사진 크게 보기 ---------------- */
-  function openLightbox(src, cap) {
+  /* ---------------- 사진 크게 보기 (v1.2.17 — 여러 장이면 ◀ ▶ 로 넘긴다) ---------------- */
+  const LB = { list: [], i: 0 };
+  function lbPaint() {
+    const p = LB.list[LB.i];
+    if (!p) return;
+    $("lbImg").src = p.src;
+    $("lbImg").alt = p.name || p.cap || "메일 사진";
+    $("lbCap").textContent = (p.cap || p.name || "")
+      + (LB.list.length > 1 ? "  ·  " + (LB.i + 1) + " / " + LB.list.length : "");
+    const many = LB.list.length > 1;
+    if ($("lbPrev")) $("lbPrev").hidden = !many;
+    if ($("lbNext")) $("lbNext").hidden = !many;
+  }
+  function lbStep(d) {
+    if (LB.list.length < 2) return;
+    LB.i = (LB.i + d + LB.list.length) % LB.list.length;
+    lbPaint();
+  }
+  function openLightbox(src, cap, list, idx) {
     const lb = $("lightbox"); if (!lb) return;
-    $("lbImg").src = src; $("lbImg").alt = cap || "메일 본문 사진"; $("lbCap").textContent = cap || "";
+    if (list && list.length) {
+      LB.list = list.slice();
+      LB.i = Math.max(0, Math.min(Number(idx) || 0, LB.list.length - 1));
+    } else {
+      LB.list = [{ src: src, name: cap || "메일 사진", cap: cap || "" }];
+      LB.i = 0;
+    }
+    lbPaint();
     lb.classList.add("on"); document.body.classList.add("locked");
   }
   function closeLightbox() {
     const lb = $("lightbox"); if (!lb) return;
     lb.classList.remove("on"); $("lbImg").src = ""; $("lbCap").textContent = "";
+    LB.list = []; LB.i = 0;
     if (!$("drawer").classList.contains("on")) document.body.classList.remove("locked");
   }
 
@@ -4069,7 +4071,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         (thr > 1 ? '<span class="thr">+' + (thr - 1) + "</span>" : "") + "</span>" +
         '<span class="rmeta"><b>' + esc(it.sender) + "</b> · " + esc(it.receivedAt) +
         (ruleForItem(it) ? ' · <span class="rm-mark" title="⚙️ 내 분류 규칙이 이 메일에 적용되어 있습니다">⚙️ 내 규칙</span>' : "") +
-        (it.attachmentSummary ? " · 📎 " + esc(it.attachmentSummary) : (it.attachments && it.attachments.length ? " · 📎 " + esc(it.attachments.length + "건") : "")) +
+        (it.attachmentSummary ? " · 📎 " + esc(it.attachmentSummary) : (attCount(it) ? " · 📎 " + attCount(it) + "건" : "")) +
         (it.imageCount ? " · 🖼 " + it.imageCount + "장" : "") +
         "</span></span>" +
       '<span class="rside">' + (isArchived(it) ? '<span class="badge b-arch">' + ((it.mailbox === "sent") ? "📤 보낸" : "📥 받은") + " · 이전 기록</span>" : "") +
@@ -5911,15 +5913,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }).join("");
     return '<div class="case-list">' + cards + "</div>";
   }
-  /* 새·미확인 메일 상단의 한 줄 제안 — 누르면 아래 🔗 섹션으로 스크롤 */
-  function caseHintHtml(it, rows) {
-    if (!rows.length) return "";
-    if (!(FRESH_IDS.has(it.id) || isNewMail(it) || !isDone(it))) return "";
-    return '<button type="button" class="case-hint" data-case-jump="1">💡 과거 유사 사례 ' + rows.length + "건 연결됨 " +
-      '(<span class="case-hint-ex">예: ' + esc(caseShortDate(rows[0].date)) + " · " + esc(caseClip(rows[0].title, 30)) + "</span> · 클릭해 참고)" +
-      "</button>";
-  }
-
   /* ✨ AI 정밀 분석 실행 — 서버가 후보 25건을 추리고 Gemini 가 고른 최대 5건을 받는다 */
   function caseAiPaint(id) {
     if (view.openId !== id) return;                 /* 그새 다른 메일을 열었으면 건드리지 않는다 */
@@ -6058,6 +6051,69 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
   window.mbImgGuard = mbImgGuard;      /* <img onload="mbImgGuard(this)"> 에서 부를 수 있게 */
 
+  /* ================= 📷 사진 목록 · 첨부 정리 (v1.2.17) =================
+     한 메일의 사진 = 본문 사진(수집 때 dataUrl 로 저장) + 사진 첨부(이름이 .jpg/.png …).
+     사진 첨부는 포털 모드에서 서버가 웹메일 쿠키로 중계한 바이트(/api/attachment)를 쓰고,
+     정적 Pages 에는 중계 서버가 없으므로 저장된 사진(dataUrl)만 보여 준다. */
+  const ATT_IMG_RE = /\.(jpe?g|png|gif|webp|bmp)$/i;
+  function attIsImage(a) { return !!a && ATT_IMG_RE.test(String(a.name || "").trim()); }
+  function attNameKey(n) { return String(n || "").replace(/\s+/g, " ").trim().toLowerCase(); }
+  /* 이름이 빈 항목(아이콘 전용 <a>)은 버리고, 같은 파일명은 한 번만 — 예전 수집분도 화면에서 바로 정리된다 */
+  function attFilter(list) {
+    const out = [], seen = {};
+    (list || []).forEach((a) => {
+      if (!a) return;
+      const name = String(a.name || "").replace(/\s+/g, " ").trim();
+      if (!name) return;
+      const key = attNameKey(name), prev = seen[key];
+      if (prev) {
+        if (!prev.size && a.size) prev.size = String(a.size);
+        if (!prev.url && a.url) prev.url = String(a.url);
+        return;
+      }
+      const rec = { name: name, size: String(a.size || ""), url: String(a.url || ""), dataUrl: String(a.dataUrl || "") };
+      seen[key] = rec; out.push(rec);
+    });
+    return out;
+  }
+  function attCount(it) { return attFilter(it && it.attachments).length; }
+  function attPhotoSrc(a) {
+    if (a.dataUrl && a.dataUrl.indexOf("data:image/") === 0) return { src: a.dataUrl, proxied: false };
+    if (!a.url || !PORTAL) return null;
+    return { src: "/api/attachment?url=" + encodeURIComponent(a.url), proxied: true };
+  }
+  function itemPhotos(it) {
+    const out = [], title = (it && it.title) || "";
+    ((it && it.images) || []).forEach((im) => {
+      if (!im || !im.dataUrl) return;
+      const name = im.name || "본문 사진";
+      out.push({ kind: "body", src: im.dataUrl, name: name, size: "", proxied: false,
+                 cap: (title ? title + " · " : "") + name });
+    });
+    attFilter(it && it.attachments).forEach((a) => {
+      if (!attIsImage(a)) return;
+      const got = attPhotoSrc(a);
+      if (!got) return;
+      out.push({ kind: "att", src: got.src, name: a.name, size: a.size, proxied: got.proxied,
+                 cap: (title ? title + " · " : "") + a.name });
+    });
+    out.forEach((p, i) => { p.pi = i; });
+    return out;
+  }
+  /* 중계가 실패한 썸네일(세션 만료 등)은 조용히 감춘다 — 파일명 칩과 하단 원본 버튼은 그대로 남는다 */
+  window.mbAttImgFail = function (img) {
+    const cell = img && img.closest ? img.closest(".img-cell") : null;
+    if (cell) cell.style.display = "none";
+    const grid = cell && cell.parentElement;
+    if (!grid) return;
+    const left = [].slice.call(grid.querySelectorAll(".att-cell")).filter((c) => c.style.display !== "none").length;
+    if (!left) {
+      grid.style.display = "none";
+      const hint = grid.parentElement && grid.parentElement.querySelector(".att-img-hint");
+      if (hint) hint.style.display = "none";
+    }
+  };
+
   function drawerHtml(it) {
     const st = stateOf(it), rows = it.actionItems || [], thr = threadOf(it), r = replyOf(it);
     /* 유사 · 과거 사례 (색인은 처음 한 번만 만들고 메일별 결과는 기억한다) */
@@ -6083,14 +6139,22 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const draft = foldSec("draft", "✉️ 답장 메일 문구 제안", "· 실무 3안 · " + esc(toAddr || "수신인 미상"), draftBody,
       { head: draftHead, openLabel: "작성" });
 
-    const atts = (it.attachments || []);
-    const attHtml = atts.length
-      ? '<div class="att-list">' + atts.map((a) => '<span class="att">📎 <span class="nm">' + esc(a.name) + '</span><span class="sz">' + esc(a.size || "") + "</span></span>").join("") + "</div>"
+    /* 📎 첨부파일 (v1.2.17) — 이름 없는 빈 칩(아이콘 전용 <a>)과 같은 파일 중복을 화면에서도 걸러
+       실제 첨부 수만 센다. 사진 첨부는 칩 대신 썸네일로 보여 주고, 누르면 크게 본다. */
+    const atts = attFilter(it.attachments);
+    const photos = itemPhotos(it);
+    const attPhotos = photos.filter((p) => p.kind === "att");
+    const attChips = atts.filter((a) => !attIsImage(a));
+    const attThumbs = attPhotos.map((p) => '<button type="button" class="img-cell att-cell" data-zoom="' + esc(it.id) + '" data-pi="' + p.pi + '" aria-label="' + esc((p.name || "첨부 사진") + " 크게 보기") + '">' +
+      '<img src="' + esc(p.src) + '" alt="' + esc(p.name || "첨부 사진") + '" loading="lazy"' + (p.proxied ? ' onerror="mbAttImgFail(this)"' : "") + '>' +
+      '<span class="zoom">🔍 크게</span><span class="att-cap">' + esc(p.name) + (p.size ? " <i>" + esc(p.size) + "</i>" : "") + "</span></button>").join("");
+    const attHtml = (attChips.length || attThumbs.length)
+      ? (attThumbs.length ? '<div class="img-grid att-grid' + (attPhotos.length === 1 ? " single" : "") + '">' + attThumbs + "</div>" +
+          '<div class="img-hint att-img-hint">사진 첨부는 눌러서 크게 볼 수 있습니다 · 안 보이면 아래 ‘웹메일 원본 ↗’에서 확인하세요</div>' : "") +
+        (attChips.length ? '<div class="att-list">' + attChips.map((a) => '<span class="att">📎 <span class="nm">' + esc(a.name) + '</span><span class="sz">' + esc(a.size || "") + "</span></span>").join("") + "</div>" : "")
       : (it.attachmentsUnverified ? '<div class="att-none">첨부 여부·파일명은 웹메일 원본에서 확인 (대시보드 미수집)</div>' : '<div class="att-none">첨부파일 없음 (본문 인라인 자료)</div>');
     const attSum = it.attachmentSummary ? '<div class="att-sum">📎 ' + esc(it.attachmentSummary) + "</div>" : "";
-    const attBlock = '<div class="sub-h">📎 첨부파일 <span class="cnt">· ' + atts.length + "건</span>" +
-      (it.mailLink ? '<a class="mini att-open" href="' + esc(it.mailLink) + '" target="_blank" rel="noopener" title="웹메일 원문을 열어 첨부파일을 내려받습니다">웹메일 원문에서 받기 ↗</a>' : "") +
-      "</div>" + attHtml + attSum;
+    const attBlock = '<div class="sub-h">📎 첨부파일 <span class="cnt">· ' + atts.length + "건</span></div>" + attHtml + attSum;
 
     /* 🕒 히스토리 — 스레드 진행 경과(최초 → 최신). 기본 접힘, 헤더에 건수 */
     const threadHtml = foldSec("history", "🕒 히스토리",
@@ -6113,12 +6177,13 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const body = tblHtml + (it.bodyText ? '<div class="body-text">' + esc(formatBodyText(it.bodyText)) + "</div>"
       : (tblHtml ? "" : '<div class="att-none">본문은 대시보드에 저장하지 않았습니다. 아래 ‘웹메일 원본 열기’에서 확인하세요.</div>'));
 
-    const imgs = it.images || [];
-    const imgHtml = imgs.length
-      ? '<div class="sub-h">🖼️ 본문 사진 <span class="cnt" data-img-count>· ' + imgs.length + "장</span></div>" +
-        '<div class="img-grid' + (imgs.length === 1 ? " single" : "") + '">' +
-        imgs.map((im, i) => '<button type="button" class="img-cell" data-zoom="' + esc(it.id) + '" data-i="' + i + '" aria-label="' + esc((im.name || "사진") + " 크게 보기") + '">' +
-          '<img src="' + esc(im.dataUrl) + '" alt="' + esc(im.name || "메일 본문 사진") + '" loading="lazy" onload="mbImgGuard(this)">' +
+    /* 🖼️ 본문 사진 — 사진 목록(본문 사진 + 사진 첨부)의 앞부분. data-pi 는 라이트박스에서 쓸 전체 순번이다. */
+    const bodyPhotos = photos.filter((p) => p.kind === "body");
+    const imgHtml = bodyPhotos.length
+      ? '<div class="sub-h">🖼️ 본문 사진 <span class="cnt" data-img-count>· ' + bodyPhotos.length + "장</span></div>" +
+        '<div class="img-grid' + (bodyPhotos.length === 1 ? " single" : "") + '">' +
+        bodyPhotos.map((p) => '<button type="button" class="img-cell" data-zoom="' + esc(it.id) + '" data-pi="' + p.pi + '" aria-label="' + esc((p.name || "사진") + " 크게 보기") + '">' +
+          '<img src="' + esc(p.src) + '" alt="' + esc(p.name || "메일 본문 사진") + '" loading="lazy" onload="mbImgGuard(this)">' +
           '<span class="zoom">🔍 크게</span></button>').join("") + "</div>" +
         '<div class="img-hint">사진을 누르면 원본 크기로 크게 볼 수 있습니다.</div>'
       : "";
@@ -6142,7 +6207,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
           (it.repliedNote && !stateOf(it).reply ? '<div class="att-sum" style="margin-top:6px">↩️ ' + esc(it.repliedNote) + "</div>" : "") +
           (rows.length ? '<div class="sub-h">✅ 할 일 <span class="cnt" data-cnt="' + it.id + '">· ' + doneCount(it) + "/" + rows.length + "</span></div>" +
             '<ul class="todo">' + checks + "</ul>" : "") +
-          caseHintHtml(it, cases),
           { id: "drAnalysis", open: true }) +
         /* 3. 🕒 히스토리 — 기본 접힘 */
         threadHtml +
@@ -6154,20 +6218,29 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="dr-sec"><div class="sec-h">🗒️ 내 메모</div>' +
           '<textarea class="memo" data-memo="' + it.id + '" placeholder="처리 내용·연락한 사람·특이사항 (이 기기에만 저장)">' + esc(st.memo || "") + "</textarea></div>" +
       "</div>" +
+      /* v1.2.17 — 하단 액션 정리: 회신 상태(3버튼)와 진행 상태(대기·진행중·완료 + 캘린더·확인)를 줄로 나누고,
+         ‘웹메일 원본’은 이 하단 한 곳으로 통일했다(첨부 헤더의 중복 링크는 뺐다). */
       '<div class="dr-foot">' +
-        '<div class="reply-row">' +
-          ["needs_reply", "replied", "no_reply_needed"].map((k) =>
-            '<button class="reply-btn ' + (r === k ? "on" : "") + '" data-reply="' + k + '" data-reply-id="' + it.id + '">' + REPLY_LABEL[k] + "</button>").join("") +
+        '<div class="ft-row">' +
+          '<span class="ft-lab">회신 상태</span>' +
+          '<div class="reply-row">' +
+            ["needs_reply", "replied", "no_reply_needed"].map((k) =>
+              '<button class="reply-btn ' + (r === k ? "on" : "") + '" data-reply="' + k + '" data-reply-id="' + it.id + '">' + REPLY_LABEL[k] + "</button>").join("") +
+          "</div>" +
         "</div>" +
-        '<select class="status-sel" data-status="' + it.id + '" aria-label="진행상태">' +
-          '<option value="todo"' + (st.status === "todo" ? " selected" : "") + ">대기</option>" +
-          '<option value="doing"' + (st.status === "doing" ? " selected" : "") + ">진행중</option>" +
-          '<option value="done"' + (st.status === "done" ? " selected" : "") + ">완료</option></select>" +
-        '<button type="button" class="mini' + (calDate(it) ? " on" : "") + '" data-cal-tog="' + esc(it.id) + '">📅 ' + (calDate(it) ? "캘린더 등록됨" : "캘린더 등록") + "</button>" +
-        '<label class="cal-date" title="등록 날짜 바꾸기">날짜 <input type="date" data-cal-date="' + esc(it.id) + '" value="' + esc(calDate(it) || calDefaultDate(it)) + '"></label>' +
-        '<button type="button" class="mini" data-done-tog="' + esc(it.id) + '">' + (isDone(it) ? "↩ 완료 취소" : "✅ 확인") + "</button>" +
-        '<a class="mini" href="' + esc(it.mailLink || "#") + '" target="_blank" rel="noopener">웹메일 원본</a>' +
-        '<span class="sp">' + esc(it.id) + "</span></div>";
+        '<div class="ft-row">' +
+          '<span class="ft-lab">진행 상태</span>' +
+          '<select class="status-sel" data-status="' + it.id + '" aria-label="진행 상태">' +
+            '<option value="todo"' + (st.status === "todo" ? " selected" : "") + ">대기</option>" +
+            '<option value="doing"' + (st.status === "doing" ? " selected" : "") + ">진행중</option>" +
+            '<option value="done"' + (st.status === "done" ? " selected" : "") + ">완료</option></select>" +
+          '<button type="button" class="mini' + (calDate(it) ? " on" : "") + '" data-cal-tog="' + esc(it.id) + '">📅 ' + (calDate(it) ? "캘린더 등록됨" : "캘린더 등록") + "</button>" +
+          '<label class="cal-date" title="등록 날짜 바꾸기">날짜 <input type="date" data-cal-date="' + esc(it.id) + '" value="' + esc(calDate(it) || calDefaultDate(it)) + '"></label>' +
+          '<button type="button" class="mini" data-done-tog="' + esc(it.id) + '">' + (isDone(it) ? "↩ 완료 취소" : "✅ 확인") + "</button>" +
+          '<a class="mini ft-origin" href="' + esc(it.mailLink || "#") + '" target="_blank" rel="noopener" title="웹메일 원본을 새 창에서 엽니다">웹메일 원본 ↗</a>' +
+          '<span class="sp">' + esc(it.id) + "</span>" +
+        "</div>" +
+      "</div>";
   }
 
   function mailtoHref(d) {
@@ -6472,7 +6545,6 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }
   });
   $("bellBtn").addEventListener("click", toggleBell);
-  $("notifTestBtn").addEventListener("click", testNotification);
   /* 상단 알림 카드 버튼 */
   $("abClose").addEventListener("click", hideAlertBanner);
   $("abOk").addEventListener("click", hideAlertBanner);
@@ -6488,6 +6560,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   });
   $("lightbox").addEventListener("click", (e) => { if (e.target.id !== "lbImg") closeLightbox(); });
   $("lbClose").addEventListener("click", closeLightbox);
+  $("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbStep(-1); });
+  $("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbStep(1); });
   /* 검색은 120ms 디바운스 — 9,242건(지난 기록 포함)을 글자마다 다시 훑지 않는다 */
   let qTimer = 0;
   $("q").addEventListener("input", (e) => {
@@ -6815,21 +6889,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const ft = e.target.closest("[data-fold]");
     if (ft && !e.target.closest("button, a, input, textarea, select")) { foldToggle(ft); return; }
 
-    /* 🔗 유사 사례 — 따라 들어가기 · 이전 메일로 돌아오기 · 제안 줄에서 섹션으로 스크롤 */
-    const cj = e.target.closest("[data-case-jump]");
-    if (cj) {
-      const sec = $("drawerContent").querySelector("#drCases");
-      if (sec) {
-        if (sec.classList.contains("fold") && !sec.classList.contains("open")) {
-          const h = sec.querySelector("[data-fold]");
-          if (h) foldToggle(h);
-        }
-        sec.scrollIntoView({ behavior: "smooth", block: "start" });
-        sec.classList.add("flash");
-        setTimeout(() => sec.classList.remove("flash"), 1200);
-      }
-      return;
-    }
+    /* 🔗 유사 사례 — 따라 들어가기 · 이전 메일로 돌아오기 */
     const cback = e.target.closest("[data-case-back]");
     if (cback) {
       const prev = caseBack[caseBack.length - 1];
@@ -6858,9 +6918,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
 
     const z = e.target.closest("[data-zoom]");
     if (z) {
-      const it = byId(z.dataset.zoom), i = Number(z.dataset.i);
-      const im = it && (it.images || [])[i];
-      if (im) openLightbox(im.dataUrl, (it.title ? it.title + " · " : "") + (im.name || ""));
+      const it = byId(z.dataset.zoom);
+      if (it) {
+        const list = itemPhotos(it), pi = Number(z.dataset.pi);
+        const p = list[pi];
+        if (p) openLightbox(p.src, p.cap, list, pi);
+      }
       return;
     }
 
@@ -6978,7 +7041,13 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (t.dataset.memo) { itemState(t.dataset.memo).memo = t.value; clearTimeout(t._h); t._h = setTimeout(saveState, 350); }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape") {
+      /* 사진 크게 보기 — ← → 로 앞뒤 사진 */
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && $("lightbox").classList.contains("on")) {
+        e.preventDefault(); lbStep(e.key === "ArrowLeft" ? -1 : 1);
+      }
+      return;
+    }
     if (rmIsOpen()) { rmClose(); return; }
     if ($("lightbox").classList.contains("on")) { closeLightbox(); return; }
     closeDrawer();

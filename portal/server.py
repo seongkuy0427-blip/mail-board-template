@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.16"
+VERSION = "1.2.17"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1995,6 +1995,94 @@ def guess_type(path: str) -> str:
     return ctype
 
 
+# ────────────────────────────────────────────────────────────── 📎 첨부 사진 중계 (v1.2.17)
+#  상세 화면의 사진 첨부 썸네일은 브라우저가 웹메일 쿠키를 갖고 있지 않아 직접 받을 수 없다.
+#  그래서 서버가 로그인한 사용자의 웹메일 세션으로 바이트만 받아 그대로 흘려보낸다.
+#  · 주소는 mail.chunil.co.kr 의 첨부 내려받기 경로만(그 밖은 403)
+#  · 응답은 사진(image/*)만, 5MB 까지
+ATTACH_MAX_BYTES = 5 * 1024 * 1024
+ATTACH_HOSTS = ("mail.chunil.co.kr",)
+ATTACH_PATHS = ("/mail_attach_down.php", "/include/download.php")
+ATTACH_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/x-ms-bmp")
+ATTACH_TTL = 600
+ATTACH_CACHE: dict[str, tuple[Any, float]] = {}
+ATTACH_LOCK = threading.Lock()
+
+
+def attachment_url_ok(raw: str) -> bool:
+    """중계해도 되는 첨부 주소인지 — 사내 웹메일 호스트 + 첨부 내려받기 경로만."""
+    try:
+        p = urlsplit(raw)
+        port = p.port
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https"):
+        return False
+    if (p.hostname or "").lower() not in ATTACH_HOSTS:
+        return False
+    if port not in (None, 80, 443):
+        return False
+    return p.path in ATTACH_PATHS
+
+
+def sniff_image_type(data: bytes) -> str:
+    """헤더 Content-Type 이 없거나 octet-stream 일 때 파일 시그니처로 사진인지 본다."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:2] == b"BM":
+        return "image/bmp"
+    return ""
+
+
+def attachment_session(uid: str):
+    """첨부 중계용 웹메일 세션 — 10분 재사용해 사진마다 로그인하지 않는다."""
+    now = time.time()
+    with ATTACH_LOCK:
+        hit = ATTACH_CACHE.get(uid)
+        if hit and now - hit[1] < ATTACH_TTL:
+            return hit[0]
+    password = load_cred(uid)
+    if not password:
+        raise PermissionError("cred")
+    with SYNC_LOCK:                       # 웹메일 로그인은 sync 와 같은 규칙으로 한 번에 하나
+        nm = NMAIL_CLASS(uid, password, ip_check=str(CFG["ip_check"]))
+        nm.login()
+    with ATTACH_LOCK:
+        ATTACH_CACHE[uid] = (nm, time.time())
+    return nm
+
+
+def fetch_attachment(uid: str, url: str) -> tuple[bytes, str]:
+    """웹메일의 첨부 바이트를 가져온다 → (bytes, content_type). 실패는 예외로 알린다."""
+    nm = attachment_session(uid)
+    try:
+        r = nm.s.get(url, timeout=20, allow_redirects=False)
+    except Exception as e:  # noqa: BLE001 - 네트워크 오류는 502 로 안내
+        raise RuntimeError(f"fetch:{type(e).__name__}") from e
+    if getattr(r, "status_code", 0) != 200:
+        # 세션이 만료됐을 수 있으니 다음 요청은 새로 로그인하게 한다
+        with ATTACH_LOCK:
+            ATTACH_CACHE.pop(uid, None)
+        raise LookupError("status")
+    ctype = str((getattr(r, "headers", {}) or {}).get("Content-Type") or "").split(";")[0].strip().lower()
+    data = r.content or b""
+    if not data:
+        raise LookupError("empty")
+    if len(data) > ATTACH_MAX_BYTES:
+        raise ValueError("too-big")
+    if ctype not in ATTACH_TYPES:
+        ctype = sniff_image_type(data)
+        if not ctype:
+            raise TypeError("not-image")
+    return data, ctype
+
+
 # ────────────────────────────────────────────────────────────── HTTP
 class PortalHandler(BaseHTTPRequestHandler):
     server_version = f"ChunilPortal/{VERSION}"
@@ -2169,6 +2257,9 @@ class PortalHandler(BaseHTTPRequestHandler):
                     return
                 self._json(HTTPStatus.OK, {"ok": True, **lock_info(uid)})
                 return
+            if path == "/api/attachment":
+                self._api_attachment()
+                return
             if path.startswith("/api/"):
                 self._err(HTTPStatus.NOT_FOUND, "없는 API 입니다")
                 return
@@ -2243,6 +2334,38 @@ class PortalHandler(BaseHTTPRequestHandler):
             self._err(HTTPStatus.UNAUTHORIZED, "로그인이 필요합니다", login=True)
             return None
         return s["user"]
+
+    def _api_attachment(self) -> None:
+        """📎 사진 첨부 중계 — 로그인 세션 + 사내 웹메일 주소만, 사진만, 5MB 까지."""
+        uid = self._require_user()
+        if not uid:
+            return
+        qs = parse_qs(urlsplit(self.path).query)
+        url = (qs.get("url") or [""])[0].strip()
+        if not url:
+            self._err(HTTPStatus.BAD_REQUEST, "첨부 주소가 없습니다", code="no_url")
+            return
+        if not attachment_url_ok(url):
+            self._err(HTTPStatus.FORBIDDEN, "허용되지 않은 첨부 주소입니다", code="bad_url")
+            return
+        try:
+            data, ctype = fetch_attachment(uid, url)
+        except PermissionError:
+            self._err(HTTPStatus.UNAUTHORIZED, "웹메일 비밀번호가 없습니다 — 다시 로그인해 주세요", login=True)
+            return
+        except LookupError:
+            self._err(HTTPStatus.NOT_FOUND, "첨부 사진을 찾지 못했습니다", code="not_found")
+            return
+        except ValueError:
+            self._err(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "첨부 사진이 너무 큽니다(5MB 까지)", code="too_big")
+            return
+        except TypeError:
+            self._err(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "사진 형식이 아닙니다", code="not_image")
+            return
+        except RuntimeError:
+            self._err(HTTPStatus.BAD_GATEWAY, "웹메일에서 사진을 받지 못했습니다", code="upstream")
+            return
+        self._send(HTTPStatus.OK, data, ctype, cache="private, max-age=600")
 
     def _api_login(self) -> None:
         body = self._body_json(limit=8192)

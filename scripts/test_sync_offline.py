@@ -315,7 +315,8 @@ def args_for(data_enc: str) -> argparse.Namespace:
                               thread_merge=True, track_replies=True, images=False, dump_dir=None,
                               chunil_id="kimtest", chunil_pw="x", ip_check="1",
                               gemini_key="fake-key", gemini_model=sm.DEFAULT_MODEL,
-                              seed_days=14, seed_max=30, board_config=None, refresh_contacts=False)
+                              seed_days=14, seed_max=30, board_config=None, refresh_contacts=False,
+                              attach_refresh=0)
 
 
 def run(pin: str, keep: bool) -> int:
@@ -399,9 +400,12 @@ def run(pin: str, keep: bool) -> int:
           f"priority={a and a['priority']} label={a and a.get('vipLabel')}")
     if a:
         rd = a.get("replyDrafts") or {}
-        check("첨부 메타·답장 초안", a.get("attachments") == [{"name": "실적.xlsx", "size": "31.11 KB"}]
+        att_a = a.get("attachments") or []
+        check("첨부 메타(이름·크기·주소)·답장 초안",
+              [{"name": x.get("name"), "size": x.get("size")} for x in att_a] == [{"name": "실적.xlsx", "size": "31.11 KB"}]
+              and att_a[0].get("url", "").startswith("https://mail.chunil.co.kr/mail_attach_down.php")
               and {"attach", "result", "forward"} <= set(rd) and rd.get("attach"),
-              str(a.get("attachments")))
+              str(att_a))
     b = items.get(f"m-{base + 2}")
     check("VIP 1-2 + To → 🔴", bool(b) and b["priority"] == 1 and b.get("vipLabel") == "1-2 주요",
           f"priority={b and b['priority']}")
@@ -581,6 +585,47 @@ def run(pin: str, keep: bool) -> int:
                                '<div><img src="/include/download.php?name=work_table.png" width="1500" height="273" alt=""></div>')
     imgs = [x["src"].split("name=")[1].split("&")[0] for x in sm.parse_read(logo_html)["images"]]
     check("로고·슬로건·서명 이미지 제외", imgs == ["image001.png", "work_table.png"], str(imgs))
+
+    # v1.2.17 — 첨부 빈 칩(아이콘 전용 <a>) 제외 · 같은 파일 중복 제거 · 내려받기 주소 저장
+    icon_li = ('<li><a href="/mail_attach_down.php?mf_no=5418517&amp;mf_an_struct=9.9" class="btn-dl">'
+               '<i class="bi bi-download"></i></a></li>')
+    dup_page = read_page(date="2026-11-24 13:05", frm='"김수현" <suhyun@chunil.co.kr>',
+                         to=["김성규 <kimpro@chunil.co.kr>"], cc=[], subject="현장 사진 송부",
+                         body="<div>사진 첨부드립니다.</div>",
+                         attach=[("사진1.jpg", "543.14K"), ("사진2.jpg", "535.76K")])
+    dup_page = dup_page.replace("</ul></td></tr>", icon_li + icon_li + "</ul></td></tr>")
+    dup_atts = sm.parse_read(dup_page)["attachments"]
+    check("빈 첨부 칩(아이콘 전용)은 첨부로 세지 않는다",
+          len(dup_atts) == 2 and [x["name"] for x in dup_atts] == ["사진1.jpg", "사진2.jpg"], str(dup_atts))
+    check("첨부 내려받기 주소(url) 저장",
+          all(str(x.get("url", "")).startswith("https://mail.chunil.co.kr/mail_attach_down.php") for x in dup_atts),
+          str(dup_atts))
+
+    # 예전 수집분 첨부 다시 읽기 — 사진 첨부(또는 빈 이름)만 대상, 일반 첨부는 건드리지 않는다
+    fixed_atts = [{"name": "사진1.jpg", "size": "543.14 KB",
+                   "url": "https://mail.chunil.co.kr/mail_attach_down.php?mf_no=7001&mf_an_struct=1.2"}]
+    old_items = [{"id": "m-7001", "receivedAt": "2026-11-24 09:00", "mailbox": "inbox",
+                  "attachments": [{"name": "사진1.jpg", "size": "543.14 KB"}, {"name": "", "size": ""}]},
+                 {"id": "m-7002", "receivedAt": "2026-11-23 09:00", "mailbox": "inbox",
+                  "attachments": [{"name": "문서.pdf", "size": "12 KB"}]}]
+
+    class _AttNm:
+        def __init__(self):
+            self.calls = []
+
+        def read_mail(self, box, mf_no):
+            self.calls.append((box, mf_no))
+            return {"attachments": [dict(x) for x in fixed_atts]}
+
+    nmx = _AttNm()
+    fixed_n = sm.refresh_attachment_meta(nmx, old_items, limit=4)
+    check("예전 첨부 다시 읽기 — 사진 첨부만 고친다",
+          fixed_n == 1 and nmx.calls == [("inbox", 7001)]
+          and old_items[0]["attachments"] == fixed_atts
+          and old_items[1]["attachments"] == [{"name": "문서.pdf", "size": "12 KB"}],
+          f"calls={nmx.calls} fixed={fixed_n}")
+    check("예전 첨부 다시 읽기 — 남은 대상이 없으면 0건",
+          sm.refresh_attachment_meta(nmx, old_items, limit=4) == 0 and nmx.calls == [("inbox", 7001)], str(nmx.calls))
     sign_body = ("하기 11/24(화) 07:00 기준 EOP자재 재고실사 결과와 재고 수량 변동 내역을 송부드립니다.\n"
                  "첨부 자료 확인 부탁드립니다.\n\n"
                  "— 서명 —\n천일정기화물자동차 (주)\nSCM사업본부 자동차물류사업부 납입1팀 과장 김성규\n"

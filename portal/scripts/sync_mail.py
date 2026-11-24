@@ -1322,14 +1322,7 @@ def parse_read(html: str) -> dict:
     elif len(soup.select("table")) > 4:
         body_text = el_text(soup.select("table")[4])
 
-    attachments = []
-    for a in soup.select("td.mf_attach_names_wrap li a"):
-        size_el = a.select_one("span.mf_attach_name_size")
-        size = _clean(size_el.get_text(" ", strip=True)) if size_el else ""
-        if size_el:
-            size_el.extract()
-        name = _clean(a.get_text(" ", strip=True))
-        attachments.append({"name": name, "size": _pretty_size(size)})
+    attachments = _parse_attachments(soup)
 
     images = []
     if body_el is not None:
@@ -1356,6 +1349,59 @@ def parse_read(html: str) -> dict:
         "attachments": attachments,
         "images": images,
     }
+
+
+_ATT_IMG_RE = re.compile(r"\.(jpe?g|png|gif|webp|bmp)$", re.I)
+
+
+def _att_image_name(name: str) -> bool:
+    """첨부 파일명이 사진인지(.jpg .jpeg .png .gif .webp .bmp) — 썸네일 대상 판정."""
+    return bool(_ATT_IMG_RE.search((name or "").strip()))
+
+
+def _parse_attachments(soup) -> list[dict]:
+    """편지읽기 페이지의 첨부 목록 → [{name, size, url?}]
+
+    · 파일명이 빈 <a>(아이콘 전용 다운로드 버튼)는 첨부가 아니라 버튼이라 버린다.
+      (2026-11-24 사용자 신고 — 첨부 3건인데 빈 [📎] 칩 3개가 함께 떠 6건으로 보임)
+    · 같은 파일명이 두 번 나오면 한 번만 남기고, 비어 있던 크기·주소는 채워 넣는다.
+    · url 은 첨부 내려받기 주소(mail.chunil.co.kr) — 포털이 사진 썸네일을 중계할 때 쓴다.
+    """
+    out: list[dict] = []
+    seen: dict[str, dict] = {}
+    wrap = soup.select_one("td.mf_attach_names_wrap") or soup
+    for a in wrap.select("li a"):
+        size_el = a.select_one("span.mf_attach_name_size")
+        size = _clean(size_el.get_text(" ", strip=True)) if size_el else ""
+        if size_el:
+            size_el.extract()
+        name = _clean(a.get_text(" ", strip=True))
+        if not name:
+            # 글자가 없는 <a> — title 에 파일명이 들어 있는 경우만 살린다
+            title = _clean(a.get("title") or "")
+            title = re.sub(r"^(다운로드|첨부\s*다운로드|내려받기|미리보기)\s*", "", title).strip()
+            name = title if title and not re.search(r"(다운로드|내려받기|미리보기)$", title) else ""
+        if not name:
+            continue
+        href = (a.get("href") or "").strip()
+        if href.startswith("/"):
+            href = BASE + href
+        if not href.startswith("http") or "javascript:" in href:
+            href = ""
+        key = re.sub(r"\s+", " ", name).strip().lower()
+        prev = seen.get(key)
+        if prev is not None:
+            if not prev.get("size") and size:
+                prev["size"] = _pretty_size(size)
+            if not prev.get("url") and href:
+                prev["url"] = href
+            continue
+        rec = {"name": name, "size": _pretty_size(size)}
+        if href:
+            rec["url"] = href
+        seen[key] = rec
+        out.append(rec)
+    return out
 
 
 def _pretty_size(raw: str) -> str:
@@ -3522,6 +3568,44 @@ def merge_into_thread(item: dict, new_item: dict) -> None:
         item["imageCount"] = len(new_item["images"])
 
 
+def refresh_attachment_meta(nm, items: list[dict], *, limit: int = 4) -> int:
+    """예전 수집분의 첨부 목록을 다시 읽어 이름 없는 빈 항목·주소 없는 사진을 고친다(한 번에 limit 건).
+
+    v1.2.17 — 사진 첨부 썸네일은 첨부 url 이 있어야 포털이 중계할 수 있다. 새로 오는 메일은
+    parse_read 가 url 까지 담지만, 이미 쌓인 메일은 다시 읽지 않으면 옛 기록이 그대로 남는다.
+    사진 첨부가 있거나 빈 항목이 섞인 최근 메일만, 실행마다 몇 건씩 조용히 갱신한다.
+    """
+    if limit <= 0:
+        return 0
+    cands: list[tuple[str, int, dict]] = []
+    for it in items:
+        atts = it.get("attachments") or []
+        if not atts:
+            continue
+        needs = any(not str(a.get("name") or "").strip() or not str(a.get("url") or "").strip() for a in atts)
+        if not needs:
+            continue
+        if not any(_att_image_name(a.get("name") or "") or not str(a.get("name") or "").strip() for a in atts):
+            continue                      # 사진이 아닌 첨부는 주소가 없어도 화면에 지장이 없다
+        m = re.fullmatch(r"[ms]-(\d+)", str(it.get("id") or ""))
+        if not m:
+            continue
+        cands.append((str(it.get("lastAt") or it.get("receivedAt") or ""), int(m.group(1)), it))
+    cands.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    fixed = 0
+    for _when, mf_no, it in cands[:limit]:
+        box = it.get("mailbox") or "inbox"
+        try:
+            detail = nm.read_mail(box, mf_no)
+        except Exception:  # noqa: BLE001 - 한 건 실패가 동기화를 막지 않는다
+            continue
+        new = detail.get("attachments") or []
+        if new and new != it.get("attachments"):
+            it["attachments"] = new
+            fixed += 1
+    return fixed
+
+
 def apply_sent_reply(items: list[dict], sent: dict, analysis: dict, contacts: dict[str, dict]) -> dict | None:
     """보낸편지함 신규 발신 → 같은 제목의 미회신 항목을 replied 로 전환."""
     target = find_thread_target(items, sent.get("subject", ""), sent.get("date") or sent.get("receivedAt") or "", days=21)
@@ -3669,12 +3753,16 @@ def sync(args: argparse.Namespace) -> dict:
             report["replied"].append({"sent_mf_no": row["mf_no"], "target": hit["id"], "subject": detail["subject"][:60]})
 
     refreshed = refresh_copied_summaries(items, contacts)   # 예전 '본문 복붙' 요약 → 3인칭 (v1.2.7)
+    # v1.2.17 — 사진 첨부 썸네일: 이름 빈 칩·주소 없는 사진 첨부를 몇 건씩 다시 읽어 고친다
+    att_fixed = refresh_attachment_meta(nm, items, limit=int(getattr(args, "attach_refresh", 4) or 0))
+    if att_fixed:
+        report["attachmentsRefreshed"] = att_fixed
     if refreshed:
         report["summariesRefreshed"] = refreshed
     if drafts_refreshed:                      # 옛 답장 초안 3종 → 실무형 3안 (v1.2.8)
         report["draftsRefreshed"] = drafts_refreshed
     changed = bool(refreshed or drafts_refreshed or added or report["replied"] or contacts_added or inferred
-                   or to_repaired or any(m.get("merged_into") for m in report["new_inbox"]))
+                   or to_repaired or att_fixed or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
     report["changed"] = changed
@@ -3881,6 +3969,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="수집·분석만 하고 파일은 쓰지 않음")
     ap.add_argument("--max-pages", type=int, default=3, help="편지함당 읽을 목록 페이지 수(100건/페이지)")
     ap.add_argument("--max-new", type=int, default=40, help="한 번에 처리할 신규 메일 상한")
+    ap.add_argument("--attach-refresh", dest="attach_refresh", type=int, default=4,
+                    help="예전 메일의 첨부 목록을 한 실행에 몇 건까지 다시 읽을지(기본 4, 0=끔)")
     ap.add_argument("--no-thread-merge", dest="thread_merge", action="store_false", default=True,
                     help="같은 제목 스레드 병합을 끄고 메일마다 항목 생성")
     ap.add_argument("--no-track-replies", dest="track_replies", action="store_false", default=True,
