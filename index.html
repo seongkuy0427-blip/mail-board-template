@@ -1845,6 +1845,9 @@
     b.textContent = "v" + APP_VER;
     b.title = "현재 화면 버전 v" + APP_VER + (window.__PORTAL_MODE__ ? " · 사내 포털 서버" : " · GitHub Pages");
   })();
+  /* 포털 서버 모드 여부 — server.py 가 window.__PORTAL_MODE__ = true 를 먼저 넣어 준다.
+     이 정적 배포본(GitHub Pages)에는 그 값이 없으므로 false 다(v1.2.22 — [✨ AI 다시 분석]·첨부 중계는 포털 전용). */
+  const PORTAL = !!window.__PORTAL_MODE__;
   /* 저장소 접근자 — 포털 모드는 로그인 아이디별로 키를 나누는 LSK 를 따로 정의하지만,
      이 배포본(GitHub Pages)에는 사용자 구분이 없어 localStorage 를 그대로 쓴다. */
   const LSK = window.localStorage;
