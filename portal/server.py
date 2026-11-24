@@ -1622,6 +1622,10 @@ def mail_analyze(uid: str, mail_id: str, *, force: bool = False) -> dict:
                 fetcher = NMAIL_CLASS(uid, pw, ip_check=str(CFG["ip_check"]))
                 fetcher.login()
                 fresh = fetcher.read_mail(item.get("mailbox") or "inbox", mail["mf_no"])
+                # v1.2.22 — 보드에는 본문을 2,500자만 남긴다. 다시 분석은 배경·인용 스레드까지 봐야 하므로
+                #   원문을 다시 읽어 왔으면 그 본문(전체)을 쓴다(프롬프트 상한 10,000자는 analysis_body 가 자른다).
+                if str(fresh.get("bodyText") or "").strip():
+                    mail["bodyText"] = fresh["bodyText"]
                 if fresh.get("attachments"):
                     mail["attachments"] = fresh["attachments"]
         except Exception as e:  # noqa: BLE001 - 첨부를 못 열면 본문만으로 분석한다
