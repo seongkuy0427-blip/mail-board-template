@@ -1011,8 +1011,11 @@
     .cy-body{padding:10px 12px 12px}
   }
 
-  /* ---------- ☀️ 오늘의 업무 브리핑 (아침 팝업) ----------
-     잠금 해제 직후 화면 중앙에 크게(680px) 떠서, 간밤에 온 메일과 오늘 챙길 것을 한눈에 보여준다. */
+  /* ---------- ☀️ 오늘의 업무 브리핑 (아침 팝업 · v1.2.20) ----------
+     한 줄 요약(날짜 · 부평 날씨 · 핵심 건수) 아래에 정확히 3블록만 둔다:
+       🔥 오늘 해야 할 일 / 📅 오늘·내일 일정 점검 / 🌙 밤새 미확인 중 꼭 봐야 할 메일
+     알록달록한 배지·색 점은 걷어내고 모노톤 + ‘지연·오늘’ 한 색(레드)만 쓴다.
+     0건인 블록은 아예 그리지 않으므로 빈 박스가 화면을 차지하지 않는다. */
   .brief-btn{height:30px; padding:0 11px; border-radius:7px; border:1px solid var(--ink);
     background:var(--ink); color:#fff; cursor:pointer;
     display:inline-flex; align-items:center; justify-content:center; gap:5px;
@@ -1023,82 +1026,76 @@
   .brief-btn:focus-visible{outline:2px solid var(--brand); outline-offset:2px}
   #briefModal{position:fixed; inset:0; z-index:74; display:none; align-items:center; justify-content:center; padding:18px}
   #briefModal.on{display:flex}
-  .bf-back{position:absolute; inset:0; background:rgba(9,9,11,.4); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px)}
-  .bf-card{position:relative; width:min(680px,94vw); max-height:min(92vh,940px); background:#fff; border:1px solid var(--line);
+  .bf-back{position:absolute; inset:0; background:rgba(9,9,11,.42); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px)}
+  .bf-card{position:relative; width:min(660px,94vw); max-height:min(88vh,820px); background:#fff; border:1px solid var(--line);
     border-radius:16px; box-shadow:0 40px 96px -40px rgba(9,9,11,.5); display:flex; flex-direction:column; overflow:hidden}
   .bf-card:focus{outline:none}
-  .bf-head{display:flex; align-items:flex-start; gap:8px; padding:16px 18px 13px; border-bottom:1px solid var(--line);
-    background:#fff; flex:none}
+  .bf-head{display:flex; align-items:flex-start; gap:8px; padding:17px 20px 0; flex:none}
   .bf-head .bf-ht{font-size:15.5px; font-weight:600; letter-spacing:-.02em; color:var(--ink)}
-  .bf-head .bf-date{font-size:11.8px; color:var(--ink-3); margin-top:3px; font-variant-numeric:tabular-nums}
-  .bf-x{margin-left:auto; flex:none; width:29px; height:29px; border-radius:7px; border:1px solid var(--line);
-    background:#fff; color:var(--ink-2); font-size:13px; cursor:pointer}
-  .bf-x:hover{background:#f4f4f5}
-  .bf-sum{padding:10px 18px; font-size:12.4px; color:var(--ink-2); background:#fff; border-bottom:1px solid var(--line-2);
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap; line-height:1.5}
-  .bf-sum .bf-sumt{flex:1 1 auto; min-width:0}
-  .bf-sumwx{margin-left:auto; flex:none; display:inline-flex; align-items:center; gap:4px; cursor:pointer; font-family:inherit;
-    border:1px solid var(--line); background:#fff; border-radius:999px; padding:2px 10px;
-    font-size:11.4px; font-weight:500; color:var(--ink-2); white-space:nowrap}
-  .bf-sumwx:hover{border-color:var(--brand); background:var(--brand-weak); color:var(--brand)}
-  .bf-body{flex:1; min-height:0; overflow-y:auto; padding:12px 16px 10px; background:var(--bg)}
-  .bf-sec{background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; overflow:hidden}
-  .bf-sec-h{display:flex; align-items:center; gap:6px; padding:10px 12px; border-bottom:1px solid var(--line-2); background:#fff; flex-wrap:wrap}
-  .bf-sec-h .bf-st{font-size:13px; font-weight:600; color:var(--ink); letter-spacing:-.01em}
-  .bf-sec-h .bf-sn{font-size:11px; font-weight:600; color:var(--ink-2); background:var(--gray-weak); border-radius:999px; padding:1px 7px}
-  .bf-sec-h .bf-when{margin-left:auto; font-size:10.6px; color:var(--ink-3); font-weight:600}
-  .bf-more{margin-left:auto; border:none; background:none; color:var(--brand); font-family:inherit;
-    font-size:10.8px; font-weight:700; cursor:pointer; padding:2px 2px}
-  .bf-more:hover{text-decoration:underline}
-  .bf-row{display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:none;
-    border-bottom:1px solid var(--line-2); background:#fff; padding:7px 12px; cursor:pointer; font-family:inherit}
-  .bf-row:last-child{border-bottom:none}
+  .bf-x{margin-left:auto; flex:none; width:28px; height:28px; border-radius:7px; border:1px solid var(--line);
+    background:#fff; color:var(--ink-3); font-size:12px; cursor:pointer; line-height:1}
+  .bf-x:hover{background:#f4f4f5; color:var(--ink)}
+  /* 한 줄 요약 — 날짜 · 부평 날씨 · 핵심 건수 (색 점·무지개 배지 없이) */
+  .bf-sum{display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding:7px 20px 12px;
+    border-bottom:1px solid var(--line); flex:none; font-size:11.8px; color:var(--ink-2);
+    line-height:1.45; font-variant-numeric:tabular-nums}
+  .bf-sum .bf-date{font-weight:600; color:var(--ink-2)}
+  .bf-sum .bf-dot{color:#d4d4d8}
+  .bf-wx{display:inline-flex; align-items:center; gap:4px; border:none; background:none; padding:0; cursor:pointer;
+    font-family:inherit; font-size:11.8px; color:var(--ink-2); border-bottom:1px dotted #d4d4d8}
+  .bf-wx:hover{color:var(--ink); border-bottom-color:var(--ink-3)}
+  .bf-wx.none{color:var(--ink-3); border-bottom-color:transparent; cursor:default}
+  .bf-cnt{margin-left:auto; flex:none; font-size:11.8px; font-weight:600; color:var(--ink-2); letter-spacing:-.01em}
+  .bf-cnt .bf-zero{color:var(--ink-3); font-weight:500}
+  .bf-body{flex:1; min-height:0; overflow-y:auto; padding:2px 20px 6px; background:#fff}
+  .bf-sec{padding:11px 0 7px; border-bottom:1px solid var(--line-2)}
+  .bf-sec:last-child{border-bottom:none; padding-bottom:2px}
+  .bf-sec-h{display:flex; align-items:center; gap:6px; padding:0 0 4px}
+  .bf-sec-h .bf-ico{font-size:12.5px; line-height:1}
+  .bf-sec-h .bf-st{font-size:12.3px; font-weight:700; color:var(--ink); letter-spacing:-.01em}
+  .bf-sec-h .bf-n{margin-left:auto; font-size:10.8px; font-weight:600; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .bf-row{display:flex; align-items:flex-start; gap:10px; width:calc(100% + 16px); margin:0 -8px; text-align:left;
+    border:none; background:none; padding:5px 8px; cursor:pointer; font-family:inherit; border-radius:6px}
   .bf-row:hover{background:#fafafa}
-  .bf-row:focus-visible{outline:2px solid var(--brand); outline-offset:-2px}
-  .bf-row .bf-p{flex:none; font-size:10px; width:14px; text-align:center}
-  .bf-row .bf-main{flex:1; min-width:0}
-  .bf-row .bf-rt{display:block; font-size:13px; font-weight:500; color:var(--ink);
+  .bf-row:focus-visible{outline:2px solid var(--brand); outline-offset:1px}
+  .bf-main{flex:1; min-width:0}
+  .bf-row .bf-tt{display:block; font-size:12.6px; font-weight:600; color:var(--ink); letter-spacing:-.01em;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .bf-row .bf-rs{display:block; font-size:11.2px; color:var(--ink-3);
+  .bf-row .bf-ac{display:block; margin-top:2px; font-size:11.2px; color:var(--ink-2); line-height:1.5;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .bf-row .bf-due{flex:none; font-size:10.7px; font-weight:600; color:var(--ink-2);
-    background:var(--gray-weak); border-radius:999px; padding:1px 8px; white-space:nowrap}
-  .bf-row .bf-due.hot{color:var(--red); background:var(--red-weak)}
-  .bf-row .bf-due.cus{color:#8a5320; background:var(--orange-weak)}
-  .bf-day{flex:none; font-size:10.2px; font-weight:600; border-radius:999px; padding:1px 8px; white-space:nowrap}
-  .bf-day.d0{background:var(--brand-weak); color:var(--brand); border:1px solid #dcdef5}
-  .bf-day.d1{background:#f4f4f5; color:#52525b; border:1px solid #e4e4e7}
-  .bf-rel{font-style:normal; font-weight:600; color:#8a5320; background:var(--orange-weak); border:1px solid #eddcc2;
-    border-radius:5px; padding:0 5px; font-size:10.4px; white-space:nowrap}
-  .bf-rel.none{color:var(--ink-3); background:transparent; border-color:transparent; font-weight:500}
-  .bf-note-row{padding:8px 12px; font-size:11.2px; color:var(--ink-3); background:#fafafa}
-  .bf-two{display:grid; grid-template-columns:1fr 1fr; gap:9px; padding:10px 12px}
-  .bf-mini{border:1px solid var(--line); border-radius:9px; background:#fff; padding:10px 12px;
-    text-align:left; cursor:pointer; font-family:inherit; display:flex; flex-direction:column; gap:1px}
-  .bf-mini:hover{border-color:#d4d4d8; background:#fafafa}
-  .bf-mini b{font-size:22px; font-weight:600; letter-spacing:-.03em; color:var(--ink); line-height:1.15; font-variant-numeric:tabular-nums}
-  .bf-mini span{font-size:11.8px; font-weight:600; color:var(--ink-2)}
-  .bf-mini i{font-size:10.4px; color:var(--ink-3); font-style:normal}
-  .bf-none{padding:10px 12px; font-size:11.6px; color:var(--ink-3)}
-  .bf-empty{background:#fff; border:1px solid var(--line); border-radius:10px; padding:26px 16px; text-align:center; margin-bottom:10px}
-  .bf-empty .bf-e-ico{font-size:24px}
-  .bf-empty .bf-e-t{font-size:13.5px; font-weight:600; color:var(--ink); margin-top:6px}
-  .bf-empty .bf-e-s{font-size:11.6px; color:var(--ink-3); margin-top:4px}
-  .bf-foot{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:12px 18px; border-top:1px solid var(--line); background:#fafafa; flex:none}
-  .bf-foot .bf-note{margin-right:auto; font-size:10.7px; color:var(--ink-3); line-height:1.45}
+  .bf-row .bf-ac .who{color:var(--ink-3)}
+  .bf-due{flex:none; margin-top:1px; font-size:10.6px; font-weight:700; color:var(--ink-3); background:#f4f4f5;
+    border:1px solid #e4e4e7; border-radius:5px; padding:1px 6px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .bf-due.hot{color:#b42318; background:#fef3f2; border-color:#fecdca}
+  .bf-due.ghost{color:var(--ink-3); background:#fff}
+  .bf-more{padding:5px 0 3px; font-size:10.9px; color:var(--ink-3)}
+  .bf-more button{border:none; background:none; padding:0; font-family:inherit; font-size:10.9px; font-weight:600;
+    color:var(--ink-2); cursor:pointer; text-decoration:underline; text-underline-offset:2px}
+  .bf-more button:hover{color:var(--ink)}
+  .bf-empty{padding:34px 4px 38px; text-align:center}
+  .bf-empty .bf-e-ico{font-size:22px}
+  .bf-empty .bf-e-t{font-size:13px; font-weight:600; color:var(--ink); margin-top:7px}
+  .bf-empty .bf-e-s{font-size:11.4px; color:var(--ink-3); margin-top:4px}
+  .bf-foot{display:flex; flex-direction:column; align-items:stretch; gap:8px; padding:11px 20px 12px;
+    border-top:1px solid var(--line); background:#fafafa; flex:none}
+  .bf-foot .bf-note{font-size:10.7px; color:var(--ink-3); line-height:1.45}
+  .bf-acts{display:flex; align-items:center; gap:8px; justify-content:flex-end; flex-wrap:wrap}
   @media (max-width:760px){
     .brief-btn{padding:0 8px; font-size:10.5px}
     .brief-btn .bf-t{display:none}
     #briefModal{padding:0}
     .bf-card{width:100%; height:100%; max-height:none; border-radius:0; border:none}
-    .bf-body{padding:10px 12px 12px}
-    .bf-head{padding:13px 13px 10px}
-    .bf-sum{padding:8px 13px}
-    .bf-foot{padding:10px 13px}
-    .bf-two{grid-template-columns:1fr}
-    .bf-foot .bf-note{flex:1 1 100%; margin-bottom:2px}
+    .bf-head{padding:15px 14px 0}
+    .bf-sum{padding:6px 14px 10px; font-size:11.4px}
+    .bf-cnt{margin-left:0; flex:1 1 100%}
+    .bf-body{padding:2px 14px 6px}
+    .bf-row{width:calc(100% + 12px); margin:0 -6px; padding:5px 6px}
+    .bf-row .bf-tt{font-size:12.2px}
+    .bf-row .bf-ac{font-size:10.9px}
+    .bf-foot{padding:10px 14px 12px}
+    .bf-acts{justify-content:space-between}
+    .bf-acts .btn{flex:1 1 0; padding-left:8px; padding-right:8px}
   }
-
   /* === PRESENTATION_START (CSS) ==========================================
      📊 발표 모드 — 임원·사내 보고용 16:9 화이트 슬라이드 덱.
      (표지 = 샘플 커버 스타일 / 본문 = 상단 조직·제목 + 3단 카드 + 점선 연결 + 파란 요약 박스)
@@ -1455,12 +1452,7 @@
 
     /* ---- 모달 (브리핑 · 규칙 · 동기화) 내부 ---- */
     .bf-head .bf-ht{font-size:15px}
-    .bf-sec-h .bf-st{font-size:12.3px}
-    .bf-sec-h .bf-when{font-size:10px}
-    .bf-row{padding:7px 10px; gap:6px}
-    .bf-row .bf-rt{font-size:12.4px}
-    .bf-row .bf-rs{font-size:10.6px}
-    .bf-mini b{font-size:20px}
+    .bf-row{padding:6px 8px; gap:8px}
     .cy-body{padding:10px 12px}
     .cy-state{font-size:11.4px}
     .rm-tabs{gap:4px}
@@ -1598,7 +1590,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.19</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.20</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1714,25 +1706,26 @@
   </div>
 </div>
 
-<!-- ============ ☀️ 오늘의 업무 브리핑 (아침 팝업) ============
-     잠금 해제 직후 자동으로 뜨는 하루 요약. ✕·[나중에]로 닫으면 30분 뒤 다시 뜨고,
+<!-- ============ ☀️ 오늘의 업무 브리핑 (아침 팝업 · v1.2.20) ============
+     잠금 해제 직후 자동으로 뜨는 3블록 요약 — 🔥 오늘 해야 할 일 / 📅 오늘·내일 일정 점검 /
+     🌙 밤새 미확인 중 꼭 봐야 할 메일. 0건인 블록은 그리지 않고, 각 줄을 누르면 그 메일 상세
+     (일정이면 캘린더 해당 날짜)로 바로 이동한다. ✕·[나중에]로 닫으면 30분 뒤 다시 뜨고,
      [오늘 하루 보지 않기]를 누르면 오늘은 자동으로 뜨지 않는다(헤더 ☀️ 브리핑으로는 언제든 열림). -->
 <div id="briefModal" role="dialog" aria-modal="true" aria-labelledby="bfTitle" aria-hidden="true">
   <div class="bf-back" data-bf-dismiss="1"></div>
   <div class="bf-card" tabindex="-1">
     <div class="bf-head">
-      <div>
-        <div class="bf-ht" id="bfTitle">☀️ 오늘의 업무 브리핑</div>
-        <div class="bf-date" id="bfDate"></div>
-      </div>
+      <div class="bf-ht" id="bfTitle">☀️ 오늘의 업무 브리핑</div>
       <button type="button" class="bf-x" data-bf-dismiss="1" aria-label="닫기">✕</button>
     </div>
     <div class="bf-sum" id="bfSum">불러오는 중…</div>
     <div class="bf-body" id="bfBody"></div>
     <div class="bf-foot">
       <span class="bf-note" id="bfNote"></span>
-      <button type="button" class="btn" id="bfLater" data-bf-dismiss="1">나중에 (30분 뒤 다시)</button>
-      <button type="button" class="btn btn-primary" id="bfHideToday">☑️ 오늘 하루 보지 않기</button>
+      <div class="bf-acts">
+        <button type="button" class="btn" id="bfLater" data-bf-dismiss="1">나중에 (30분 뒤 다시)</button>
+        <button type="button" class="btn btn-primary" id="bfHideToday">☑️ 오늘 하루 보지 않기</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1833,7 +1826,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.19").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.20").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -2704,81 +2697,31 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function matches(it) { const q = view.q.trim().toLowerCase(); return q ? searchBlob(it).includes(q) : true; }
 
-  /* ---------------- ☀️ 오늘의 업무 브리핑 (아침 팝업) ----------------
-     잠금 해제 직후 화면 중앙에 크게 띄우는 하루 요약. ‘간밤에 온 메일 → 오늘 챙길 것’ 순서로 읽힌다.
+  /* ---------------- ☀️ 오늘의 업무 브리핑 (아침 팝업 · v1.2.20) ----------------
+     잠금 해제 직후 화면 중앙에 띄우는 하루 요약. 상단 한 줄(날짜 · 부평 날씨 · 핵심 건수) 아래에
+     딱 3블록만 둔다 — 추가 AI 호출은 없다(이미 저장된 분석 + 이 기기의 localStorage 만 쓴다).
+       ① 🔥 오늘 해야 할 일 — 지연·오늘 마감·🔴 즉시 미완료 중 핵심 4건.
+          제목 + ‘언제까지 누구에게 무엇을’이 드러나는 구체적 할 일 1줄 + 기한 배지(지연/오늘/D-1…).
+       ② 📅 오늘·내일 일정 점검 — 오늘·내일 일정 1줄씩(시간 · 일정명 · 연결 메일). 0건이면 블록 자체를 숨긴다.
+       ③ 🌙 밤새 미확인 중 꼭 봐야 할 메일 — 어제 18시 이후 온 ‘🔴 즉시’ 미확인만(✅ 확인·⚪ 공유·출하리스트 제외),
+          ①에 이미 올라간 건은 빼고 최대 4건. 전체 간밤 수신은 작은 숫자 한 줄로만 알린다.
+     각 줄을 누르면 브리핑이 닫히면서 그 메일 상세(일정이면 캘린더 해당 날짜)로 바로 간다.
      노출 규칙
        · localStorage `mb_brief_hide_v1` 에 오늘 날짜가 있으면 그날은 자동으로 뜨지 않는다.
-       · ✕ · [나중에]로 닫으면 저장하지 않고, 마지막 닫은 시각(briefDismissAt)에서 30분 뒤
-         1분 자동 동기화(refresh(false)) 때 다시 뜨다. 새로고침(F5)하면 다시 뜨다(기준은 화면 메모리).
-       · [오늘 하루 보지 않기]를 누르면 오늘 날짜를 저장하고 닫는다. 헤더 ☀️ 브리핑 버튼으로는 언제든 열린다.
-     내용은 DATA + 이 기기의 localStorage(완료·회신·캘린더·고정)를 그때그때 다시 계산해 그린다. */
+       · ✕ · [나중에]로 닫으면 저장하지 않고, 마지막 닫은 시각에서 30분 뒤 1분 자동 동기화 때 다시 뜬다.
+       · [오늘 하루 보지 않기]를 누르면 오늘 날짜를 저장하고 닫는다. 헤더 ☀️ 브리핑 버튼으로는 언제든 열린다. */
   const BRIEF_SNOOZE_MS = 30 * 60 * 1000;
-  const BRIEF_ROW_MAX = 4;
-  const BRIEF_NEW_MAX = 3;
-  let briefDismissAt = 0;   /* 이 화면에서 ‘나중에’로 닫은 시각 — 새로 열면 초기화된다 */
+  const BRIEF_TODO_MAX = 4;    /* 🔥 오늘 해야 할 일 최대 줄 수 */
+  const BRIEF_NIGHT_MAX = 4;   /* 🌙 밤새 미확인 최대 줄 수 */
+  const BRIEF_LINE_MAX = 50;   /* 할 일·이유 한 줄 길이(글자) */
+  let briefDismissAt = 0;      /* 이 화면에서 ‘나중에’로 닫은 시각 — 새로 열면 초기화된다 */
 
-  function briefHideDate() { try { return localStorage.getItem(LS.brief) || ""; } catch (e) { return ""; } }
+  function briefHideDate() { try { return LSK.getItem(LS.brief) || ""; } catch (e) { return ""; } }
   function briefHiddenToday() { return briefHideDate() === todayY(); }
   function briefIsOpen() { const m = $("briefModal"); return !!m && m.classList.contains("on"); }
-  function briefDateLabel() { return todayY() + " " + DOW[new Date().getDay()] + "요일"; }
+  function briefDateLabel() { const n = new Date(); return (n.getMonth() + 1) + "월 " + n.getDate() + "일 (" + DOW[n.getDay()] + ")"; }
 
-  /* 간밤 = 어제 18:00 이후. 그 뒤 받은편지함에 들어온 메일을 ‘간밤 새 메일’로 센다. */
-  function briefSinceMs() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1, 18, 0, 0).getTime(); }
-  function briefOvernightList() {
-    const t0 = briefSinceMs();
-    return items().filter((it) => {
-      if ((it.mailbox || "inbox") === "sent") return false;
-      const raw = it.receivedAt ? String(it.receivedAt) : "";
-      const t = Date.parse(raw.replace(" ", "T"));
-      return !isNaN(t) && t >= t0;
-    }).sort((a, b) => (priorityOf(a) - priorityOf(b)) || String(b.receivedAt).localeCompare(String(a.receivedAt)));
-  }
-
-  function bfPrio(i) { const p = priorityOf(i); return p === 1 ? "🔴" : (p === 2 ? "🟡" : "⚪"); }
-
-  function bfMailRow(it, withPrio) {
-    const d = dueInfo(it);
-    const due = d && d.text ? '<span class="bf-due' + (d.hot ? " hot" : "") + '">' + esc(d.text.replace(/^⏰\s*/, "")) + "</span>" : "";
-    return '<button type="button" class="bf-row" data-bf-go="mail" data-bf-id="' + esc(it.id) + '" title="' + esc(it.title + " — 누르면 메일 상세") + '">' +
-      (withPrio ? '<span class="bf-p">' + bfPrio(it) + "</span>" : "") +
-      '<span class="bf-main"><span class="bf-rt">' + esc(it.title) + "</span>" +
-      '<span class="bf-rs">' + esc(senderLabel(it)) + (isNewMail(it) ? " · 🆕 NEW" : "") + "</span></span>" + due + "</button>";
-  }
-  /* 📅 브리핑용 일정 모음 — 오늘(D-DAY) + 내일(D-1)
-     수기 일정(cusLoad)과 캘린더에 등록한 메일(calLoad)을 함께 담고, 수기 일정은
-     relatedMails()로 매칭되는 관련 메일 건수까지 계산해 ‘자료 검토 필요’ 배지를 단다. */
-  function briefCalList() {
-    const out = [];
-    const days = [[todayY(), "오늘", 0], [ymd(addDays(new Date(), 1)), "내일 D-1", 1]];
-    days.forEach(([date, lab, idx]) => {
-      cusFor(date).forEach((c) => {
-        let n = 0;
-        try { n = relatedMails(c).list.length; } catch (e) { n = 0; }
-        out.push({ kind: "cus", day: lab, idx: idx, c: c, n: n });
-      });
-      calItems().filter((it) => calDate(it) === date).forEach((it) => {
-        out.push({ kind: "mail", day: lab, idx: idx, it: it });
-      });
-    });
-    return out;
-  }
-  function bfCalRow(x) {
-    const day = '<span class="bf-day ' + (x.idx === 0 ? "d0" : "d1") + '">' + esc(x.day) + "</span>";
-    if (x.kind === "cus") {
-      const c = x.c;
-      const rel = x.n
-        ? '<em class="bf-rel">🔗 관련 메일 ' + x.n + '건 · 자료 검토 필요</em>'
-        : '<em class="bf-rel none">관련 메일 없음</em>';
-      return '<button type="button" class="bf-row" data-bf-go="cus" data-bf-id="' + esc(c.id) + '" title="' + esc(c.title + " — 관련 메일 보기") + '">' +
-        '<span class="bf-p">📌</span><span class="bf-main"><span class="bf-rt">' + esc(c.title) + "</span>" +
-        '<span class="bf-rs">' + (c.memo ? esc(c.memo) + " · " : "") + rel + "</span></span>" + day + "</button>";
-    }
-    const it = x.it;
-    return '<button type="button" class="bf-row" data-bf-go="mail" data-bf-id="' + esc(it.id) + '" title="' + esc(it.title + " — 메일 상세") + '">' +
-      '<span class="bf-p">📅</span><span class="bf-main"><span class="bf-rt">' + esc(it.title) + "</span>" +
-      '<span class="bf-rs">' + esc(senderLabel(it)) + " · 캘린더에 등록한 메일</span></span>" + day + "</button>";
-  }
-  /* 🌤️ 날씨 한 줄 — 현재 기온·상태 + 7일 안에 비·눈이 있으면 그 예보까지 */
+  /* 🌤️ 날씨 한 줄 — 현재 기온·상태 + 7일 안에 비·눈이 있으면 그 예보까지 (헤더 칩과 같은 자료) */
   function briefWxParts() {
     if (!WX) return null;
     const cur = WX.current || {}, d = WX.daily || {};
@@ -2801,104 +2744,315 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       feels: Math.round(wxNum(cur.apparent_temperature, 0)), wet: wetTxt };
   }
 
-  function briefBodyHtml() {
-    const p1 = p1Items().filter((i) => !isDone(i));
-    const todayMail = kpiTodayMailList();
-    const reply = kpiReplyList();
-    const fu = fuPending();
-    const fuMax = fu.length ? Math.max.apply(null, fu.map((f) => Number(f.daysElapsed) || 0)) : 0;
-    const cal = briefCalList();
-    const overnight = briefOvernightList();
-    const ovToday = overnight.filter((it) => String(it.receivedAt).slice(0, 10) === todayY()).length;
-    const ovP = [1, 2, 3].map((p) => overnight.filter((it) => priorityOf(it) === p).length);
+  /* ── 구체적 할 일 한 줄 뽑기 (v1.2.20) ─────────────────────────────────────
+     이미 저장된 AI 분석에서 ‘언제까지 누구에게 무엇을’이 드러나는 문장만 고른다(추가 API 0회).
+     우선순위: actionItems[0] → myAction → ourDeptAction → 3단 요약의 ‘남은 일’ →
+              3단 요약 결론(나/우리 부서) → headline.
+     “확인 바랍니다”·“참고하시기 바랍니다”·“…요청한 건”·“[참조 모니터링]” 같은 상투어는 건너뛴다. */
+  const BF_FILLER = /^(?:확인|검토|참고|회신|열람)\s*(?:바랍니다|부탁|요청|드립니다|하시기|해\s*주)/;
+  const BF_ABSTRACT = /(?:요청한\s*건|안내한\s*건|전달한\s*건|공유한\s*건|통보한\s*건|보고한\s*건|요청드립니다|참조\s*하시|참고\s*하시|확인\s*부탁|회신\s*부탁|확인\s*바랍니다|참조\s*(?:흐름|모니터링)|직접\s*조치\s*없음|회신\s*불필요)[.。]?$/;
+  const BF_NONE = /^(?:없음|해당\s*없음|조치\s*없음|특이\s*사항\s*없음)/;
+  /* “…바랍니다”·“…부탁드립니다”로 끝나는 정중한 요청문은 행동이 아니라 상투어로 본다 */
+  const BF_POLITE = /(?:바랍니다|부탁\s*드립니다|요청\s*드립니다|해\s*주시기\s*바랍니다)[.。]?$/;
+  /* 하루에도 몇 통씩 오는 정형 리스트 — 보드에 다 있으니 브리핑 4줄을 차지하지 않게 뺀다 */
+  const BF_ROUTINE = /(?:출하\s*리스트|납입\s*요청|보급\s*지시|미상차\s*현황|통합\s*배차|MRD\s*납입)/;
+  /* 예전에 넣어 둔 알림 테스트 메일 — 오늘 할 일에 섞이지 않게 */
+  const BF_TEST = /^\s*\[?\s*테스트|테스트\s*(?:메일건|메일\s*\d|30분|트트)/;
+  const BF_GREET = /^(?:안녕하십니까|안녕하세요|수고하십|업무에\s*노고|하기\s*내용|첨부\s*파일)/;
 
+  function bfClean(s) {
+    let t = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+    if (!t) return "";
+    t = t.split("💡")[0].split("✅")[0].split("※")[0];
+    t = t.replace(/^(?:이슈|진행|남은 일|할 일|조치|결론)\s*[:：]\s*/, "");
+    t = t.replace(/^[-•·▶▸]\s*/, "");
+    t = t.replace(/^\[(?:직접 회신 필요|직접 조치 없음|참조[^\]]*|타 부서[^\]]*|팀원[^\]]*)\]\s*/g, "");
+    t = t.replace(/^(?:우리 부서|나)\s*(?:\([^)]*\))?\s*[:：]\s*/, "");
+    t = t.replace(/\s*\((?:기한|별도 회신 기한)[^)]{0,24}\)\s*$/, "");
+    t = t.replace(/[.。]\s*$/, "").trim();
+    return t;
+  }
+  function bfClip(s) {
+    const t = String(s || "");
+    return t.length > BRIEF_LINE_MAX ? t.slice(0, BRIEF_LINE_MAX - 1).replace(/[\s,·→\-]+$/, "") + "…" : t;
+  }
+  /* 실제 행동이 담긴 문장인지 — 아니면 "" */
+  function bfConcrete(s) {
+    const raw = String(s == null ? "" : s).trim();
+    if (/^\[\s*(?:직접\s*조치\s*없음|참조|타\s*부서)/.test(raw)) return "";   /* [직접 조치 없음 · 참조 모니터링] 류 */
+    const t = bfClean(raw);
+    if (!t || t.length < 6) return "";
+    if (BF_FILLER.test(t) || BF_ABSTRACT.test(t) || BF_NONE.test(t) || BF_POLITE.test(t)) return "";
+    if (/참조\s*(?:흐름|모니터링)|직접\s*조치\s*없음|회신\s*불필요/.test(t)) return "";
+    return t;
+  }
+  /* 후보 중 ‘날짜·품번·→’처럼 구체적인 것 먼저 — 없으면 처음 통과한 문장 */
+  function bfPick(cands) {
+    let fallback = "";
+    for (let i = 0; i < cands.length; i++) {
+      const t = bfConcrete(cands[i]);
+      if (!t) continue;
+      if (/\d/.test(t) || t.indexOf("→") >= 0 || t.length >= 24) return t;
+      if (!fallback) fallback = t;
+    }
+    return fallback;
+  }
+  /* 3단·1문단 요약에서 ‘남은 일 / 우리 부서 / 나 / 첫 문장’을 뽑아 둔다 */
+  function bfSummaryParts(it) {
+    const sum = String((it && it.summary) || "");
+    const out = { left: "", dept: "", mine: "", first: "" };
+    const mm = sum.match(/남은 일\s*[:：]\s*([^\n]+)/);
+    if (mm) out.left = mm[1];
+    const dm = sum.match(/우리 부서[^\n:：]*[:：]\s*([^\n]+)/);
+    if (dm) out.dept = dm[1];
+    const nm = sum.match(/나\([^)]*\)\s*[:：]\s*([^\n]+)/);
+    if (nm) out.mine = nm[1];
+    out.first = bfFirstLine(sum);
+    return out;
+  }
+  /* 요약의 ‘무슨 건인지’ 한 줄 — 3단 분석이면 1) 진행 경과의 마지막 줄, 아니면 첫 문장 */
+  function bfFirstLine(sum) {
+    const s = String(sum || "");
+    if (!s.trim()) return "";
+    if (/🔄\s*업무 진행 경과|업무 진행 경과 \(최초/.test(s)) {
+      const lines = s.split(/\n/).map((x) => x.trim()).filter(Boolean);
+      const sec = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (/^2\)|🎯\s*요청 대상/.test(lines[i])) break;
+        sec.push(lines[i]);
+      }
+      for (let i = sec.length - 1; i >= 0; i--) {
+        const m = sec[i].match(/^-\s*\[[^\]]*\]\s*(.+)$/);
+        if (m) return bfClean(m[1]);
+      }
+    }
+    const flat = s.replace(/\s+/g, " ").trim();
+    const m = flat.match(/^(.{6,140}?(?:다|건|함|음|요))\s*[.。]/);
+    return bfClean(m ? m[1] : flat.slice(0, 140));
+  }
+  /* 그 메일이 나(또는 우리 팀)에게 실제로 시키는 일 — 없으면 "" */
+  function bfAction(it) {
+    if (!it) return "";
+    const p = bfSummaryParts(it);
+    const cands = [];
+    if (Array.isArray(it.actionItems)) it.actionItems.forEach((x) => cands.push(x));
+    cands.push(it.myAction, it.ourDeptAction, p.left, p.mine, p.dept);
+    return bfPick(cands);
+  }
+  /* 이유·맥락 한 줄 — 할 일이 없으면 무슨 건인지, 그것도 없으면 기한 문구 */
+  function bfReason(it) {
+    const act = bfAction(it);
+    if (act) return act;
+    /* 기한 문구가 ‘무엇을 언제까지’를 담고 있으면 그게 더 쓸모 있다 */
+    const dl = bfClean(it && it.deadline);
+    if (dl && dl.length >= 8 && !/(?:기한\s*없음|별도\s*회신|참고\s*\(|열람\s*안내)/.test(dl)) return dl;
+    const first = bfSummaryParts(it).first;
+    if (first && !BF_GREET.test(first)) return first;
+    return dl;
+  }
+
+  /* ── 기한 배지 — 지연 / 오늘 07:00 / D-1 / 즉시 ──────────────────────────── */
+  function bfDue(it) {
+    const due = dueOf(it), ms = deadlineMs(it);
+    if (due) {
+      const dd = diffDays(due, todayY());
+      const tm = (String((it && it.deadline) || "").match(/(\d{1,2}:\d{2})/) || [])[1] || "";
+      if (dd < 0) return { t: "지연", hot: true };
+      if (dd === 0) return { t: tm ? "오늘 " + tm : "오늘", hot: true };
+      return { t: "D-" + dd };
+    }
+    if (ms !== null && ms <= Date.now()) return { t: "지연", hot: true };
+    if (priorityOf(it) === 1) return { t: "즉시", ghost: true };
+    return null;
+  }
+  function bfBadgeHtml(b) {
+    if (!b) return "";
+    return '<span class="bf-due' + (b.hot ? " hot" : "") + (b.ghost ? " ghost" : "") + '">' + esc(b.t) + "</span>";
+  }
+
+  /* ── ① 오늘 해야 할 일 후보 ─────────────────────────────────────────────
+     지연(오래된 것부터) → 오늘 마감(마감 시각 빠른 순) → 🔴 즉시(구체적 할 일이 있는 건만)
+     → 내일(D-1). ✅ 확인·이미 회신(replied)한 건은 🔴 목록에서 뺀다. */
+  function bfTodoList() {
+    const rows = [], seen = new Set(), byTitle = new Set();
+    const tkey = (it) => String((it && it.title) || "").replace(/^\s*(?:re|fw|fwd)\s*[:：]\s*/gi, "")
+      .replace(/[\s·ㆍ,.;:!?\-_/\\|"'“”‘’()\[\]→>~～]+/g, "").toLowerCase();
+    const push = (it, group, act) => {
+      const id = String(it && it.id), tk = tkey(it);
+      if (!it || seen.has(id) || (tk && byTitle.has(tk))) return;
+      seen.add(id);
+      if (tk) byTitle.add(tk);
+      rows.push({ it: it, group: group, act: act });
+    };
+    const entries = d3Build().rows.filter((e) => e.type === "mail" && e.day !== null);
+    /* 지연은 최근 3일 안에 놓친 것만 — 그보다 오래된 출하리스트·납입요청이 아침 브리핑을 덮지 않게.
+       더 오래된 🔴 은 아래 ‘즉시’ 줄에서 구체적 할 일이 있을 때만 다시 올라온다. */
+    const keep = (it) => !BF_ROUTINE.test(String((it && it.title) || "")) && !BF_TEST.test(String((it && it.title) || ""));
+    /* 오늘 마감이 먼저 — 이미 늦은 건(지연)은 그다음, 최근에 놓친 것부터 */
+    entries.filter((e) => e.day === 0 && keep(e.it) && replyOf(e.it) !== "replied")
+      .sort((a, b) => ((deadlineMs(a.it) || Infinity) - (deadlineMs(b.it) || Infinity)) || (rank(a.it) - rank(b.it)))
+      .forEach((e) => push(e.it, 0, bfAction(e.it)));
+    entries.filter((e) => e.day < 0 && e.day >= -3 && keep(e.it) && replyOf(e.it) !== "replied")
+      .sort((a, b) => (b.day - a.day) || (rank(a.it) - rank(b.it)))
+      .forEach((e) => push(e.it, 1, bfAction(e.it)));
+    /* 기한이 없거나 내일까지인 🔴 만 — D-6·D-9 처럼 먼 기한의 🔴 은 ‘오늘 할 일’이 아니다 */
+    p1Items().filter((it) => {
+      if (isDone(it) || replyOf(it) === "replied" || !keep(it)) return false;
+      const due = dueOf(it);
+      return !due || diffDays(due, todayY()) <= 1;
+    })
+      .sort((a, b) => (rank(a) - rank(b)) || timeDesc(a, b))
+      .forEach((it) => { const act = bfAction(it); if (act) push(it, 2, act); });
+    entries.filter((e) => e.day === 1 && keep(e.it))
+      .sort((a, b) => (rank(a.it) - rank(b.it)))
+      .forEach((e) => push(e.it, 3, bfAction(e.it)));
+    return rows;
+  }
+
+  /* ── ② 오늘·내일 일정 ─────────────────────────────────────────────────
+     수기 일정 + 캘린더에 등록한 메일. 수기 일정은 연결된 관련 메일 건수까지 센다. */
+  function bfCalRows() {
+    const out = [];
+    [[todayY(), "오늘", 0], [ymd(addDays(new Date(), 1)), "내일", 1]].forEach(([date, lab, idx]) => {
+      cusFor(date).forEach((c) => {
+        let n = 0;
+        try { n = relatedMails(c).list.length; } catch (e) { n = 0; }
+        out.push({ kind: "cus", id: String(c.id), title: c.title, memo: String(c.memo || "").trim(), n: n, day: lab, idx: idx });
+      });
+      calItems().filter((it) => calDate(it) === date && !isDone(it)).forEach((it) => {
+        out.push({ kind: "mail", id: String(it.id), title: calTitle(it), memo: calMemo(it), n: 0, day: lab, idx: idx, it: it });
+      });
+    });
+    return out;
+  }
+
+  /* ── ③ 밤새(어제 18시 이후) 미확인 🔴 ───────────────────────────────── */
+  function bfSinceMs() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1, 18, 0, 0).getTime(); }
+  function bfOvernightAll() {
+    const t0 = bfSinceMs();
+    return items().filter((it) => {
+      if ((it.mailbox || "inbox") === "sent") return false;
+      if (isArchived(it)) return false;
+      const t = Date.parse(String(it.receivedAt || "").replace(" ", "T"));
+      return !isNaN(t) && t >= t0;
+    });
+  }
+  function bfNightList(skip) {
+    return bfOvernightAll()
+      .filter((it) => priorityOf(it) === 1 && !isDone(it) && !skip.has(String(it.id)))
+      .sort((a, b) => timeDesc(a, b));
+  }
+
+  /* 한 번에 계산 — 요약줄과 본문이 같은 자료를 쓴다 */
+  function briefData() {
+    const todoAll = bfTodoList();
+    const todo = todoAll.slice(0, BRIEF_TODO_MAX);
+    /* ①에 실제로 올라간 줄만 ③에서 뺀다 — 4줄 밖으로 밀린 🔴 은 ③에 다시 보인다 */
+    const skip = new Set();
+    todo.forEach((r) => skip.add(String(r.it.id)));
+    const cal = bfCalRows();
+    const over = bfOvernightAll();
+    const nightAll = bfNightList(skip);
+    return { todoAll: todoAll, todo: todo, cal: cal, over: over,
+      nightAll: nightAll, night: nightAll.slice(0, BRIEF_NIGHT_MAX) };
+  }
+
+  function bfMailRow(it, sub, badge) {
+    return '<button type="button" class="bf-row" data-bf-go="mail" data-bf-id="' + esc(it.id) + '"' +
+      ' title="' + esc(it.title + " — 누르면 메일 상세로 이동") + '">' +
+      '<span class="bf-main"><span class="bf-tt">' + esc(it.title) + "</span>" +
+      '<span class="bf-ac">' + sub + "</span></span>" + bfBadgeHtml(badge) + "</button>";
+  }
+
+  function briefBodyHtml(d) {
+    d = d || briefData();
+    if (!d.todoAll.length && !d.cal.length && !d.nightAll.length) {
+      return '<div class="bf-empty"><div class="bf-e-ico">☀️</div>' +
+        '<div class="bf-e-t">오늘 챙길 마감·일정·미확인 메일이 없습니다</div>' +
+        '<div class="bf-e-s">보드에서 새 메일을 확인하거나, 아래 ‘나중에’로 닫아 두세요.</div></div>';
+    }
     let html = "";
 
-    /* 0) 🌙 간밤·어제 18시 이후 새로 들어온 메일 */
-    html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-st">🌙 간밤 새 메일</span><span class="bf-sn">' + overnight.length + '건</span>' +
-      '<span class="bf-when">어제 18시 이후 수신 · 오늘 ' + ovToday + '건' +
-        (overnight.length ? " · 🔴 " + ovP[0] + " · 🟡 " + ovP[1] + " · ⚪ " + ovP[2] : "") + "</span></div>" +
-      (overnight.length
-        ? overnight.slice(0, BRIEF_NEW_MAX).map((it) => bfMailRow(it, true)).join("")
-        : '<div class="bf-none">어제 18시 이후 새로 들어온 메일이 없습니다.</div>') +
-      "</div>";
-
-    if (!p1.length && !todayMail.length && !reply.length && !fu.length) {
-      /* 모든 할 일이 0건 — 깔끔한 빈 상태 */
-      html += '<div class="bf-empty"><div class="bf-e-ico">☀️</div>' +
-        '<div class="bf-e-t">오늘 남은 마감·미확인 업무가 없습니다</div>' +
-        '<div class="bf-e-s">즉시 확인 · 오늘 마감 · 회신 대기 · 미회신 추적이 모두 0건입니다. 좋은 하루 되세요.</div></div>';
-    } else {
-      /* 1) 📅 오늘(D-DAY) · 내일(D-1) 일정 — 수기 일정 + 캘린더에 등록한 메일 */
-      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-st">📅 오늘·내일 일정</span><span class="bf-sn">' + cal.length + '건</span>' +
-        '<button type="button" class="bf-more" data-bf-go="cal">캘린더 ▸</button></div>' +
-        (cal.length ? cal.map(bfCalRow).join("")
-          : '<div class="bf-none">오늘·내일 등록된 일정이 없습니다 — 📅 캘린더에서 직접 추가할 수 있습니다.</div>') + "</div>";
-
-      /* 2) 🔴 즉시 확인 미완료 */
-      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-st">🔴 즉시 확인 미완료</span><span class="bf-sn">' + p1.length + '건</span>' +
-        (p1.length > BRIEF_ROW_MAX ? '<button type="button" class="bf-more" data-bf-go="p1">전체 ▸</button>' : "") + "</div>" +
-        (p1.length ? p1.slice(0, BRIEF_ROW_MAX).map((it) => bfMailRow(it, false)).join("") : '<div class="bf-none">즉시 확인할 🔴 메일이 없습니다.</div>') + "</div>";
-
-      /* 3) ⏰ 오늘 마감 · 기한 지남 (메일) */
-      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-st">⏰ 오늘 마감 · 기한 지남</span><span class="bf-sn">' + todayMail.length + '건</span>' +
-        '<button type="button" class="bf-more" data-bf-go="today">전체 ▸</button></div>' +
-        (todayMail.length
-          ? todayMail.slice(0, BRIEF_ROW_MAX).map((it) => bfMailRow(it, false)).join("") +
-            (todayMail.length > BRIEF_ROW_MAX ? '<div class="bf-note-row">…외 ' + (todayMail.length - BRIEF_ROW_MAX) + "건은 ‘⏰ D-3 마감’에서 전부 볼 수 있습니다.</div>" : "")
-          : '<div class="bf-none">오늘 기한·임박한 메일이 없습니다.</div>') + "</div>";
-
-      /* 4) ✉️ 회신 대기 · ⏳ 보낸 요청 미회신 */
-      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-st">✉️ 회신 대기 · ⏳ 보낸 요청 미회신</span></div><div class="bf-two">' +
-        '<button type="button" class="bf-mini" data-bf-go="reply"><b>' + reply.length + '</b><span>✉️ 회신 대기</span><i>🔴·🟡 중 아직 답장 안 한 건</i></button>' +
-        '<button type="button" class="bf-mini" data-bf-go="fu"><b>' + fu.length + '</b><span>⏳ 보낸 요청 미회신</span><i>' +
-          (fu.length ? "최장 " + fuMax + "일째 회신 없음" : "회신을 기다리는 보낸 요청 없음") + "</i></button>" +
-        "</div></div>";
+    /* ① 🔥 오늘 해야 할 일 */
+    if (d.todoAll.length) {
+      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-ico">🔥</span>' +
+        '<span class="bf-st">오늘 해야 할 일</span><span class="bf-n">' + d.todoAll.length + "건</span></div>" +
+        d.todo.map((r) => bfMailRow(r.it, esc(bfClip(r.act || bfReason(r.it) || "요청 내용 확인")), bfDue(r.it))).join("") +
+        (d.todoAll.length > d.todo.length
+          ? '<div class="bf-more">외 ' + (d.todoAll.length - d.todo.length) + '건 <button type="button" data-bf-go="d3">전체 보기</button></div>'
+          : "") + "</div>";
     }
 
-    /* 4) 🌤️ 부평 날씨 — 헤더 바로 아래 한 줄(브리핑을 열면 늘 보이게) */
+    /* ② 📅 오늘·내일 일정 점검 */
+    if (d.cal.length) {
+      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-ico">📅</span>' +
+        '<span class="bf-st">오늘·내일 일정 점검</span><span class="bf-n">' + d.cal.length + "건</span></div>" +
+        d.cal.map((x) => {
+          let sub = x.memo;
+          const tm = (sub.match(/(\d{1,2}:\d{2})/) || [])[1] || "";
+          if (tm && sub.indexOf(tm) !== 0) sub = tm + " · " + sub;
+          if (x.n) sub = (sub ? sub + " · " : "") + "관련 메일 " + x.n + "건 · 자료 검토";
+          if (!sub) sub = x.kind === "mail" ? "캘린더에 등록한 메일" : "메모 없음";
+          const go = x.kind === "cus" ? "cus" : "mail";
+          return '<button type="button" class="bf-row" data-bf-go="' + go + '" data-bf-id="' + esc(x.id) + '"' +
+            ' title="' + esc(x.title + " — " + (x.kind === "cus" ? "관련 메일·캘린더로 이동" : "메일 상세로 이동")) + '">' +
+            '<span class="bf-main"><span class="bf-tt">' + esc(x.title) + "</span>" +
+            '<span class="bf-ac">' + esc(bfClip(sub)) + "</span></span>" +
+            bfBadgeHtml({ t: x.day, hot: false }) + "</button>";
+        }).join("") + "</div>";
+    }
+
+    /* ③ 🌙 밤새 미확인 중 꼭 봐야 할 메일 */
+    if (d.nightAll.length) {
+      html += '<div class="bf-sec"><div class="bf-sec-h"><span class="bf-ico">🌙</span>' +
+        '<span class="bf-st">밤새 미확인 중 꼭 봐야 할 메일</span><span class="bf-n">' + d.nightAll.length + "건</span></div>" +
+        d.night.map((it) => {
+          const tm = String(it.receivedAt || "").slice(11, 16);
+          const reason = bfClip(bfReason(it) || "확인 필요");
+          return bfMailRow(it, '<span class="who">' + esc(senderLabel(it)) + "</span>" + (reason ? " · " + esc(reason) : ""),
+            tm ? { t: tm, hot: false, ghost: true } : null);
+        }).join("") +
+        (d.nightAll.length > d.night.length
+          ? '<div class="bf-more">외 ' + (d.nightAll.length - d.night.length) + '건 <button type="button" data-bf-go="p1">전체 보기</button></div>'
+          : "") +
+        (d.over.length > d.nightAll.length
+          ? '<div class="bf-more">어제 18시 이후 ' + d.over.length + "건 수신 · 나머지 " +
+            (d.over.length - d.nightAll.length) + "건은 보드에서 볼 수 있습니다</div>"
+          : "") + "</div>";
+    }
     return html;
   }
 
-  /* 요약줄 우측의 🌤️ 날씨 칩 — 누르면 헤더의 시간별·7일 예보가 열린다 */
+  /* 요약줄 — 날짜 · 부평 날씨 · 핵심 건수 (색 점·무지개 배지 없이) */
+  function briefSumHtml(d) {
+    d = d || briefData();
+    const bits = [];
+    if (d.todoAll.length) bits.push("할 일 " + d.todoAll.length);
+    if (d.cal.length) bits.push("일정 " + d.cal.length);
+    if (d.nightAll.length) bits.push("밤새 " + d.nightAll.length);
+    return '<span class="bf-date">' + esc(briefDateLabel()) + '</span><span class="bf-dot">·</span>' +
+      briefWxChip() +
+      '<span class="bf-cnt">' + (bits.length ? bits.join(" · ") : '<span class="bf-zero">챙길 일 없음</span>') + "</span>";
+  }
+  /* 🌤️ 날씨 — 누르면 헤더의 시간별·7일 예보가 열린다 */
   function briefWxChip() {
     const w = briefWxParts();
-    return '<button type="button" class="bf-sumwx" data-bf-go="wx" title="눌러서 시간별·7일 예보 보기">' +
-      '<span>🌤️</span><span>' + (w ? "인천 부평 " + w.t + "°C · " + esc(w.name) + (w.wet ? " · " + esc(w.wet) : "")
-        : (WX_FAIL ? "날씨 불러오지 못함 · 잠시 후 재시도" : "날씨 불러오는 중…")) + "</span></button>";
-  }
-
-  function briefSumHtml() {
-    return '<span class="bf-sumt">' + esc(briefSumText()) + "</span>" + briefWxChip();
-  }
-
-  function briefSumText() {
-    const p1 = p1Items().filter((i) => !isDone(i)).length;
-    const todayN = d3Build().total;
-    const reply = kpiReplyList().length;
-    const fu = fuPending().length;
-    const calN = briefCalList().length;
-    const bits = [];
-    if (calN) bits.push("📅 " + calN + "건");
-    if (p1) bits.push("🔴 " + p1 + "건");
-    if (todayN) bits.push("⏰ D-3 " + todayN + "건");
-    if (reply) bits.push("✉️ " + reply + "건");
-    if (fu) bits.push("⏳ " + fu + "건");
-    return "🌙 간밤 새 메일 " + briefOvernightList().length + "건 · " +
-      (bits.length ? "지금 챙길 것 " + bits.join(" · ") : "오늘 남은 마감·미확인 업무가 없습니다");
+    if (!w) return '<span class="bf-wx none">' + (WX_FAIL ? "날씨 불러오지 못함" : "날씨 불러오는 중") + "</span>";
+    return '<button type="button" class="bf-wx" data-bf-go="wx" title="눌러서 시간별·7일 예보 보기">부평 ' + w.t + "°C " + esc(w.name) +
+      (w.wet ? " · " + esc(w.wet) : "") + "</button>";
   }
 
   /* 열려 있을 때 1분 동기화마다 다시 계산해 그린다(스크롤 위치는 유지). */
   function briefRender() {
     const b = $("bfBody");
     if (!b || !DATA) return;
-    const st = b.scrollTop, html = briefBodyHtml();
+    const d = briefData();
+    const st = b.scrollTop, html = briefBodyHtml(d);
     if (b.dataset.sig !== html) { b.innerHTML = html; b.dataset.sig = html; b.scrollTop = st; }
-    if ($("bfDate")) $("bfDate").textContent = briefDateLabel();
-    if ($("bfSum")) $("bfSum").innerHTML = briefSumHtml();
+    if ($("bfSum")) $("bfSum").innerHTML = briefSumHtml(d);
     if ($("bfNote")) $("bfNote").textContent = briefHiddenToday()
       ? "오늘은 ‘보지 않기’를 선택하셨습니다 — 상단 ☀️ 브리핑으로 언제든 다시 열 수 있습니다."
-      : "✕ · 나중에는 30분 뒤 1분 자동 동기화 때 다시 뜨고, [오늘 하루 보지 않기]를 누르면 오늘은 자동으로 뜨지 않습니다.";
+      : "✕·[나중에]는 30분 뒤 다시 뜹니다 · [오늘 하루 보지 않기]는 오늘 자동으로 띄우지 않습니다.";
   }
 
   function briefOpen() {
@@ -2917,11 +3071,12 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (!m || !m.classList.contains("on")) return;
     m.classList.remove("on");
     m.setAttribute("aria-hidden", "true");
-    if (!$("drawer").classList.contains("on") && !$("lightbox").classList.contains("on") && !rmIsOpen() && !deckIsOpen()) {
+    const deckOn = (typeof deckIsOpen === "function") ? deckIsOpen() : false;   /* 발표 모드가 있는 판에서만 */
+    if (!$("drawer").classList.contains("on") && !$("lightbox").classList.contains("on") && !rmIsOpen() && !deckOn) {
       document.body.classList.remove("locked");
     }
     if (mode === "hide") {
-      try { localStorage.setItem(LS.brief, todayY()); } catch (e) {}
+      try { LSK.setItem(LS.brief, todayY()); } catch (e) {}
       mbSyncMark("brief");
       briefDismissAt = 0;
       toast("오늘 하루는 브리핑을 자동으로 띄우지 않습니다 — 상단 ☀️ 브리핑으로 언제든 다시 볼 수 있습니다", 3400);
@@ -2941,26 +3096,16 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       view.kpi = ""; view.q = "";
       const qEl = $("q"); if (qEl) qEl.value = "";
       view.cusId = c.id; view.day = c.date; view.calOpen = true;
-      try { localStorage.setItem(LS.cal, "1"); } catch (e) {}
+      try { LSK.setItem(LS.cal, "1"); } catch (e) {}
       syncTogs(); renderCalendar(); renderSeg(); renderList();
       const lw = $("listWrap"); if (lw) { try { lw.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }
       toast("📅 “" + c.title + "” 관련 메일을 모아 봅니다", 2800);
       return;
     }
-    if (go === "cal") {
-      view.calOpen = true; view.day = todayY(); view.cusId = null;
-      try { localStorage.setItem(LS.cal, "1"); } catch (e) {}
-      renderCalendar(); renderList();
-      const bar = $("calBar"); if (bar) { try { bar.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
-      toast("내 캘린더를 열었습니다 — 오늘·내일 일정과 관련 메일을 볼 수 있습니다", 2600);
-      return;
-    }
-    if (go === "today") { onKpi("d3"); return; }
+    if (go === "d3") { onKpi("d3"); return; }
     if (go === "p1") { onKpi("p1"); return; }
-    if (go === "reply") { onKpi("reply"); return; }
-    if (go === "fu") { onKpi("fu"); return; }
     if (go === "wx") {
-      try { localStorage.setItem(LS.wx, "1"); } catch (e) {}
+      try { LSK.setItem(LS.wx, "1"); } catch (e) {}
       paintWxOpen();
       const bar = $("wxBar"); if (bar) { try { bar.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
       toast("인천 부평 시간별·7일 예보를 열었습니다", 2400);
