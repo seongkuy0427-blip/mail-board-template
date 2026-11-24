@@ -4748,7 +4748,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function anaRowHtml(row) {
     const t = row.replace(/^[-•·]\s*/, "");
-    const m = t.match(/^([^:：]{2,14})\s*[:：]\s*(.+)$/);
+    /* `[11/20 09:12] …` 같은 타임라인 줄의 시각 콜론을 라벨로 오인하지 않는다 — 라벨은 한글 머리말만 */
+    const m = t.match(/^([^\s:：[\]0-9][^:：[\]]{1,13})\s*[:：]\s*(.+)$/);
     if (!m) return '<div class="ana-l">' + esc(t) + "</div>";
     const k = m[1].trim(), v = m[2].trim();
     const cls = /^\[?\s*(없음|할 일 없음|단순 참조)/.test(v) ? "ana-none"
