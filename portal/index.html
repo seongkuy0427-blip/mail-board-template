@@ -492,6 +492,14 @@
   .row.done{opacity:.55}
   .row.hot{background:#fffbf7; border-color:#f0dcc8}
   .row.over{background:#fffafa; border-color:#f2d4d5}
+  /* ✨ v1.2.10 — 지금 상세가 열려 있는 메일 행(.is-active).
+     호버(#fafafa)와 구분되는 옅은 블루 바탕 + 왼쪽 4px 인디고 바(테두리 2px + inset 2px).
+     inset 그림자라 레이아웃이 밀리지 않고, :hover 에서도 활성 색·바를 그대로 유지한다 */
+  .row.is-active,
+  .row.is-active:hover{background:#eef1fc; border-color:#c6cceb; border-left-color:var(--brand);
+    box-shadow:inset 2px 0 0 var(--brand)}
+  .row.is-active .rtitle,
+  .row.is-active:hover .rtitle{color:#0b0b0f; font-weight:600}
   .row .rank{flex:none; font-size:9.8px; font-weight:600; color:#b02a30; background:var(--red-weak); border:1px solid #f6d6d8;
     border-radius:5px; padding:2px 5px; min-width:24px; text-align:center; font-variant-numeric:tabular-nums; letter-spacing:-.01em}
   .row .rank.vip{background:#fdf6ec; color:#8a5320; border-color:#eddcc2}
@@ -1372,7 +1380,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.9</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.10</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1583,7 +1591,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.9").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.10").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -3560,12 +3568,29 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   /* ---------------- 렌더: 목록 ---------------- */
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
+  /* ✨ v1.2.10 — 선택된(상세가 열린) 메일 행 강조.
+     rowHtml·fuRowHtml 이 그릴 때 view.openId 하나만 보고 .is-active 를 붙이므로, 탭·KPI 카드·검색·
+     회신 필요만 보기·60초 자동 갱신으로 목록을 다시 그려도 열려 있는 메일의 강조가 그대로 따라온다.
+     드로어를 닫으면(✕·Esc·바깥 클릭) view.openId 가 비고 syncActiveRows() 가 화면의 행에서 바로 클래스를 뗀다. */
+  function mbIsActive(id) {
+    return view.openId != null && view.openId !== "" && String(view.openId) === String(id);
+  }
+  function syncActiveRows() {
+    const w = $("listWrap"); if (!w || !w.querySelectorAll) return;
+    const cur = view.openId == null ? "" : String(view.openId);
+    [...w.querySelectorAll("[data-open]")].forEach((el) => {
+      const on = !!cur && el.getAttribute("data-open") === cur;
+      if (on) { if (!el.classList.contains("is-active")) el.classList.add("is-active"); }
+      else if (el.classList.contains("is-active")) el.classList.remove("is-active");
+    });
+  }
   function rowHtml(it, opts) {
     const p = priorityOf(it), d = dueInfo(it), r = replyOf(it), st = stateOf(it);
     const d3 = opts && opts.d3;   /* ⏰ D-3 마감 목록 — 기한 배지 대신 [D-3]/[오늘]/[D+N 지연] 배지를 단다 */
     const thr = threadOf(it).length;
     const pin = isPinned(it);
-    const cls = "row p" + p + (pin ? " pinned" : "") + (p === 1 && d.hot && !isDone(it) ? (d.past ? " over" : " hot") : "") + (st.status === "done" ? " done" : "");
+    const cls = "row p" + p + (pin ? " pinned" : "") + (p === 1 && d.hot && !isDone(it) ? (d.past ? " over" : " hot") : "") + (st.status === "done" ? " done" : "") +
+      (mbIsActive(it.id) ? " is-active" : "");
     const rankTxt = p === 1 ? "1-" + (Number(it.vipRank) || 3) : (p === 2 ? "🟡" : "⚪");
     const rankCls = "rank p" + p + (it.isVip && Number(it.vipRank) === 1 ? " vip" : "");
     const replyCls = r === "needs_reply" ? "b-reply" : (r === "replied" ? "b-replied" : "b-noreply");
@@ -3860,7 +3885,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function fuRowHtml(f) {
     const done = fuDone(f);
-    return '<div class="row fu' + (done ? " done" : "") + '" data-open="' + esc(f.id) + '" role="button" tabindex="0" aria-label="' + esc(f.title) + '">' +
+    return '<div class="row fu' + (done ? " done" : "") + (mbIsActive(f.id) ? " is-active" : "") + '" data-open="' + esc(f.id) + '" role="button" tabindex="0" aria-label="' + esc(f.title) + '">' +
       (bulkTab() === "fu" ? '<span class="selbox"><input type="checkbox" data-sel-tog="' + esc(f.id) + '"' + (bulkSel.fu.has(f.id) ? " checked" : "") +
         ' aria-label="이 요청 선택 (한꺼번에 완료)" title="선택해서 한꺼번에 완료"></span>' : "") +
       '<span class="rank fu">' + (done ? "✅" : "⏳") + "</span>" +
@@ -5225,6 +5250,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const f = fupById(id);
     if (f) {
       view.openId = id;
+      syncActiveRows();
       $("drawerContent").innerHTML = fuDrawerHtml(f);
       $("drawer").classList.add("on");
       mbDrawerIn();
@@ -5238,6 +5264,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const wasNew = isNewMail(it);
     if (wasNew) { FRESH_IDS.add(String(it.id)); markSeenAll([it.id]); }
     view.openId = id;
+    syncActiveRows();
     $("drawerContent").innerHTML = drawerHtml(it);
     $("drawer").classList.add("on");
     mbDrawerIn();
@@ -5260,6 +5287,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function closeDrawer() {
     view.openId = null;
+    syncActiveRows();          /* ✨ 열려 있던 행의 강조를 바로 뗀다 */
     caseBack = [];
     $("drawerContent").innerHTML = "";
     $("drawer").classList.remove("on");
