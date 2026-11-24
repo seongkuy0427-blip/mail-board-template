@@ -2,3 +2,6 @@
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 cryptography>=42,<46
+# v1.2.21 — 첨부(.xlsx·.pdf) 핵심 내용 추출. 없으면 표준 zipfile 로 .xlsx/.docx 만 읽는다(조용히 건너뜀)
+openpyxl>=3.1,<4
+pypdf>=4,<7
