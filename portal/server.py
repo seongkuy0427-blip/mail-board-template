@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1116,8 +1116,10 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             sent = sent[: CFG["max_new"]]
 
         if not inbox and not sent and not first:
-            try:      # 새 메일이 없어도 예전 '본문 복붙' 요약은 3인칭으로 한 번 정리한다 (v1.2.7)
-                if sm.refresh_copied_summaries(board["items"], contacts):
+            try:      # 새 메일이 없어도 예전 요약·답장 초안은 한 번 정리한다 (v1.2.7 · v1.2.8)
+                fixed = sm.refresh_copied_summaries(board["items"], contacts)
+                fixed += sm.refresh_reply_drafts(board["items"])
+                if fixed:
                     atomic_write_json(board_path, board, mode=0o600)
             except Exception as e:  # noqa: BLE001 - 정리가 실패해도 동기화 상태는 그대로 알린다
                 print(f"[sync] {uid} 요약 정리 실패: {type(e).__name__}", file=sys.stderr)
@@ -1184,6 +1186,9 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         refreshed = sm.refresh_copied_summaries(board["items"], contacts)   # 예전 '본문 복붙' 요약 → 3인칭 (v1.2.7)
         if refreshed:
             print(f"[sync] {uid} 예전 요약 {refreshed}건을 3인칭 요약으로 정리", flush=True)
+        drafts_fixed = sm.refresh_reply_drafts(board["items"])              # 옛 답장 초안 → 실무형 3안 (v1.2.8)
+        if drafts_fixed:
+            print(f"[sync] {uid} 답장 초안 {drafts_fixed}건을 실무형 3안으로 정리", flush=True)
         # ── 메타
         #  첫 실행은 지금 모은 메일에서 직급을 한 번 더 추론한다(위에는 쌓인 기록이 없었으므로)
         if sm.ensure_owner_title(board, sent_texts=title_sent, inbox_texts=title_inbox):

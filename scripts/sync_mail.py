@@ -1554,9 +1554,9 @@ ANALYSIS_SCHEMA = {
         "replyDrafts": {
             "type": "object",
             "properties": {
-                "polite": {"type": "string"},
-                "factual": {"type": "string"},
-                "concise": {"type": "string"},
+                "attach": {"type": "string"},
+                "result": {"type": "string"},
+                "forward": {"type": "string"},
             },
         },
     },
@@ -1600,8 +1600,23 @@ SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성�
 - replied: 본문에 이미 회신한 흔적이 뚜렷한 건.
 
 [replyDrafts]
-- replyStatus 가 needs_reply 일 때만 3가지 톤으로 쓴다(그 외에는 생략).
-- polite(정중·양해), factual(핵심·사실), concise(사내·간결). 서명은 "김성규 드림" 또는 "김성규".
+- replyStatus 가 needs_reply 일 때만 3가지를 쓴다(그 외에는 생략).
+- **말투 3종이 아니라 실무 상황 3종**이다. 세 안이 서로 다른 내용이어야 하고, "확인했습니다. 회신드리겠습니다"
+  같은 접수·보류 멘트만 있으면 실패다(실무에서 그런 답장은 보내지 않는다).
+- attach(📎 자료 송부형): 요청받은 자료·파일을 정리해 첨부로 바로 보낼 때.
+  예) "요청하신 11월 KPI & BPD 자료를 정리하여 첨부 송부드립니다. 첨부된 파일 확인 부탁드리며, 추가 확인 사항이
+  있으시면 말씀해 주시기 바랍니다." 실제 자료명·품번·건수를 넣고, [첨부] 목록이 있으면 "- 첨부: 파일명 (크기)" 한 줄로 적는다.
+- result(✅ 조치·결과 회신형): 첨부 없이 확인·조치 결과를 본문으로 답할 때.
+  예) "요청하신 2품번 재고실사 건 확인 결과 공유드립니다. 13524683 11EA·13540045 5EA로 확인되었으니 참고 부탁드립니다."
+  원문에 수치·품번·일자가 있으면 그대로 쓰고, 모르면 "- 확인 결과: [수치·조치 내용 기입]"처럼 채울 자리만 남긴다.
+- forward(👉 담당자 전달·확인중): 담당자·유관부서 확인이 필요해 기한을 두고 다시 회신할 때.
+  예) "보내주신 26년 11월 KPI 자료 회신 요청 건 확인했습니다. 본 건은 관련 담당자 확인 후 12/3(목)까지 재회신드리겠습니다."
+- 말투 자동: 보낸 사람 주소가 @chunil.co.kr 이 아니면(외부·GM) 격식체 —
+  첫 줄 "{이름 직급}님, 안녕하십니까." + 둘째 줄 "천일정기화물자동차(주) {부서} 김성규입니다.",
+  사내(@chunil.co.kr)면 "{이름 직급}님, 안녕하세요." 로 시작한다.
+- **인사말은 한 번만**: "안녕하세요."를 두 줄 연속 쓰거나 첫 인사 뒤에 또 쓰지 않는다.
+- **호칭 띄어쓰기**: "과장 님"·"차장 님"처럼 직급과 '님'을 띄우지 않는다 → "과장님".
+- 서명은 "김성규 드림"(외부면 그 아래 "천일정기화물자동차(주) {부서}")으로 끝낸다.
 
 [category] 승인/검토, PTR, 결품/보고, 불량/품질, 재고/실사, 현황/보고, 출하/보급, 납입요청, 일정/공유,
 조직/업무, 공지/안전, 자료요청, 자재/확인, 기타 중 하나.
@@ -1919,6 +1934,326 @@ def refresh_copied_summaries(items: list[dict], contacts: dict | None = None) ->
 
 
 
+# ────────────────────────────────────────────────────────────── 실무형 답장 초안 3종 (v1.2.8)
+#  말투 3종(정중·사실·사내)이 아니라 **실무 상황 3종**이다. 같은 내용을 말만 바꿔 쓰면
+#  "확인했습니다. 회신드리겠습니다"밖에 남지 않아 실제 답장에 쓸 수 없다는 지적(11-24)을 반영했다.
+#  개인판(정적 보드)에는 OWNER·DEFAULT_COMPANY 설정이 없어도 이 모듈이 돌아가게 한다.
+try:                                                         # noqa: B018 - 존재 확인
+    OWNER
+except NameError:                                            # pragma: no cover
+    OWNER = {"name": "김성규", "title": "과장", "dept": "납입1팀",
+             "company": "천일정기화물자동차", "email": "kimpro@chunil.co.kr"}
+try:
+    DEFAULT_COMPANY
+except NameError:                                            # pragma: no cover
+    DEFAULT_COMPANY = "천일정기화물자동차"
+DRAFT_DOMAIN = "chunil.co.kr"                                # 사내 메일 도메인(외부/사내 말투 판정)
+
+TONE_KEYS = ("attach", "result", "forward")      # 📎 자료 송부형 · ✅ 조치·결과 회신형 · 👉 담당자 전달·확인중
+TONE_LEGACY = {"attach": "polite", "result": "factual", "forward": "concise"}   # v1.2.7 이전 키
+RANK_WORDS = (r"과장|차장|부장|대리|사원|주임|계장|팀장|실장|소장|상무|전무|이사|사장|"
+              r"매니저|프로|선임|수석|원장|센터장|파트장")
+RANK_NIM_RE = re.compile(rf"({RANK_WORDS})\s+님")        # "과장 님" → "과장님"
+GREET_ONLY_RE = re.compile(r"^(?:안녕하십니까|안녕하세요|수고하십니다|수고하셨습니다|반갑습니다)\s*[,.!?]*$")
+GREET_ANY_RE = re.compile(r"안녕하십니까|안녕하세요|수고하십니다|반갑습니다")
+DRAFT_HEAD_RE = re.compile(r"^(?:수신|받는\s*사람|제목|참조|보낸\s*사람|일자|날짜)\s*[:：]")
+DRAFT_TOPIC_TAIL_RE = re.compile(
+    r"\s*(?:에\s*대한\s*)?(?:회신|송부|제출|확인|공유|자료)?\s*요청\s*(?:의\s*)?(?:건)?\s*$")
+EMPTY_ACK_RE = re.compile(r"(?:확인|접수)\s*(?:을\s*)?(?:완료|했습니다|하였습니다|드렸습니다)")
+PROMISE_RE = re.compile(r"(?:회신|송부|보내|연락|공유|전달)\s*드리(?:겠|도록)")
+
+
+def fix_honorific(text: str) -> str:
+    """'과장 님'·'차장 님' 처럼 직급과 '님' 사이를 띄운 표기를 붙여 쓴다."""
+    t = RANK_NIM_RE.sub(r"\1님", text or "")
+    return re.sub(r"\s+([,.])", r"\1", t)
+
+
+def _honorific(name: str) -> str:
+    """'김태영 과장' → '김태영 과장님', 직급이 없으면 '김태영 님'."""
+    n = re.sub(r"\s*\([^)]*\)\s*", " ", name or "").strip()
+    n = re.sub(r"\s+", " ", n)
+    n = RANK_NIM_RE.sub(r"\1님", n)
+    if not n:
+        return "담당자님"
+    if n.endswith("님"):
+        return n
+    if re.search(rf"(?:{RANK_WORDS})$", n):
+        return n + "님"
+    return n + " 님"
+
+
+def call_name(sender: str, email: str = "", contacts: dict | None = None) -> str:
+    """답장 첫 줄에 쓸 호칭 — 사내 주소록·발신자 표기에서 이름·직급을 뽑는다."""
+    name, title, _org = _sender_parts(sender or "", email or "", contacts or {})
+    base = f"{name} {title}".strip() if name else ""
+    if not base:
+        base = sender or ""
+    return _honorific(base)
+
+
+def is_external(sender_email: str, sender_label: str = "") -> bool:
+    """받는 사람(원 발신자)이 외부인가 — @chunil.co.kr 이 아니면 외부(격식체로 쓴다)."""
+    em = (sender_email or "").strip().lower()
+    if em:
+        return not em.endswith("@" + DRAFT_DOMAIN)
+    return "GM" in (sender_label or "") or "고객사" in (sender_label or "")
+
+
+def draft_topic(title: str, limit: int = 60) -> str:
+    """'RE: 26년 11월 KPI & BPD 자료 … 회신 요청' → '26년 11월 KPI & BPD 자료 …'."""
+    t = str(title or "").replace("\r", " ")
+    for _ in range(3):
+        t = re.sub(r"^\s*(?:re|fw|fwd|답장|전달)\s*[:：]\s*", "", t, flags=re.I)
+    t = re.sub(r"^\s*\[[^\]]{0,24}\]\s*", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    cut = DRAFT_TOPIC_TAIL_RE.sub("", t).strip(" ,·-")
+    if len(cut) >= 4:
+        t = cut
+    return (t[:limit].rstrip() + "…") if len(t) > limit else t
+
+
+def draft_due_text(due: str) -> str:
+    """'2026-12-03' → '12/3(목)' — 답장에 그대로 쓰는 기한 표기."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", str(due or ""))
+    if not m:
+        return ""
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        wd = "월화수목금토일"[dt.date(y, mo, d).weekday()]
+    except ValueError:
+        return ""
+    return f"{mo}/{d}({wd})"
+
+
+def _draft_attach_line(atts: list[dict]) -> str:
+    names = []
+    for a in (atts or [])[:3]:
+        nm = str(a.get("name") or "").strip()
+        if not nm:
+            continue
+        size = str(a.get("size") or "").strip()
+        names.append(f"{nm} ({size})" if size else nm)
+    if not names:
+        return ""
+    more = len(atts) - len(names)
+    return "- 첨부: " + ", ".join(names) + (f" 외 {more}건" if more > 0 else "")
+
+
+def _draft_core(text: str) -> str:
+    """예전 초안에서 인사말·수신/제목 줄·서명을 걷어낸 '알맹이'만 남긴다."""
+    paras = [re.sub(r"[ \t]+", " ", p).strip()
+             for p in re.split(r"\n\s*\n", str(text or "").replace("\r", ""))]
+    keep: list[str] = []
+    for p in paras:
+        if not p:
+            continue
+        if GREET_ONLY_RE.match(p):
+            continue
+        if GREET_ANY_RE.search(p) and len(p) < 90:              # "OOO 님, 안녕하세요." 한 줄
+            continue
+        if DRAFT_HEAD_RE.match(p):
+            continue
+        if re.match(r"^(?:감사합니다|수고하십시오)\s*[.!]?$", p):
+            continue
+        if re.search(r"(?:드림|배상)\s*$", p) and len(p) < 40:
+            continue
+        if re.match(r"^천일정기화물자동차", p) and len(p) < 60:   # 소속 소개 줄
+            continue
+        if re.match(r"^(?:확인|검토|참고)\s*(?:후|부탁|바랍니다|해\s*주)", p) and len(p) < 90:
+            continue                                            # "확인 후 말씀해 주세요" 맺음말
+        if re.search(r"추가로?\s*(?:필요한|확인할)\s*(?:사항|부분)이?\s*있으면", p) and len(p) < 110:
+            continue                                            # 맺음말 중복 방지
+        if re.match(r"^.{0,60}(?:확인했습니다|접수했습니다|확인하였습니다)[.\s]*$", p):
+            continue                                            # "…확인했습니다." 만 있는 줄
+        keep.append(p)
+        if len(keep) >= 5:
+            break
+    return "\n\n".join(keep)[:600]
+
+
+def _owner_sign() -> tuple[str, str]:
+    """(서명 이름, 소속 한 줄) — 예) ("김성규", "천일정기화물자동차(주) 납입1팀")"""
+    name = (OWNER.get("name") or "").strip()
+    company = (OWNER.get("company") or DEFAULT_COMPANY).strip()
+    if company and not re.search(r"\(주\)|㈜", company):
+        company += "(주)"
+    org = " ".join(x for x in (company, (OWNER.get("dept") or "").strip()) if x)
+    return name, org
+
+
+def _draft_has_dup_greeting(text: str) -> bool:
+    """'안녕하세요.' 가 두 번(줄 연속·문단 연속) 들어간 초안인가."""
+    t = str(text or "")
+    lines = [ln.strip() for ln in t.split("\n")]
+    greets = [ln for ln in lines if GREET_ONLY_RE.match(ln)]
+    if len(greets) >= 2:
+        return True
+    return bool(re.search(r"안녕하십니까|안녕하세요", t) and
+                len(re.findall(r"(?:안녕하십니까|안녕하세요)\s*[.!]?", t)) >= 2)
+
+
+def _looks_empty_ack(text: str) -> bool:
+    """'확인했습니다. 회신드리겠습니다' 식의 접수·보류 멘트뿐인가(옛 3종 초안 판별)."""
+    core = _draft_core(text)
+    if not core:
+        return True
+    if not (EMPTY_ACK_RE.search(core) and PROMISE_RE.search(core)):
+        return False
+    concrete = bool(re.search(r"\d{2,}|[A-Z]{2,}\d|품번|첨부|파일|까지", core))
+    return not concrete
+
+
+def _draft_bullets(acts: list[str], limit: int = 3) -> str:
+    """할 일(actionItems)을 답장 본문에 넣을 글머리표로 — 실제 품번·기한이 그대로 남는다."""
+    out = []
+    for a in (acts or [])[:limit]:
+        s = re.sub(r"\s+", " ", str(a or "")).strip()
+        s = re.sub(r"^(?:\d{1,2}[).]\s*|[-•·]\s*)", "", s)
+        if s:
+            out.append("- " + s)
+    return "\n".join(out)
+
+
+def build_reply_drafts(item: dict, core: str = "") -> dict:
+    """항목 하나로 실무형 3안을 만든다 (Gemini 없이도 쓰는 기본값).
+
+    - attach  📎 자료 송부형        : 요청받은 자료를 정리해 첨부로 바로 보낼 때
+    - result  ✅ 조치·결과 회신형   : 첨부 없이 결과·수치·조치를 본문으로 답할 때
+    - forward 👉 담당자 전달·확인중 : 담당자·유관부서 확인 후 기한을 두고 재회신할 때
+    말투는 받는 사람에 맞춰 자동 — 외부(@gm.com 등)는 격식체, 사내(@chunil.co.kr)는 간결체.
+    """
+    ext = is_external(item.get("senderEmail") or "",
+                      item.get("sender") or item.get("senderName") or "")
+    who = call_name(item.get("senderName") or item.get("sender") or "", item.get("senderEmail") or "")
+    name, org = _owner_sign()
+    topic = draft_topic(item.get("title") or "") or "보내주신 건"
+    due = draft_due_text(item.get("dueDate") or "")
+    obj = _josa(topic, "을", "를")
+    hello = f"{who}, 안녕하십니까." if ext else f"{who}, 안녕하세요."
+    head = (hello + "\n" + f"{org} {name}입니다." + "\n\n") if (ext and org and name) else (hello + "\n\n")
+    sign = "\n\n감사합니다.\n\n" + (f"{name} 드림" if name else "드림") + (f"\n{org}" if ext and org else "")
+    atts = item.get("attachments") or []
+    att_line = _draft_attach_line(atts)
+    bullets = _draft_bullets([str(a) for a in (item.get("actionItems") or [])])
+    core = (core or "").strip()
+    ask_ext = "추가로 확인하실 사항이 있으시면 말씀해 주시기 바랍니다."
+    ask_int = "추가로 확인이 필요한 부분이 있으면 말씀 주세요."
+
+    body = ([f"요청하신 {topic}{obj} 정리하여 첨부 송부드립니다."] if atts
+            else [f"요청하신 {topic} 관련 내용 정리하여 공유드립니다."])
+    if att_line:
+        body.append(att_line)
+    if bullets:
+        body.append(bullets)
+    elif core:
+        body.append(core)
+    body.append(("첨부한 파일 확인 부탁드리며, " + ask_ext) if ext else ("첨부한 파일 확인 부탁드리고, " + ask_int))
+    attach = head + "\n\n".join(body) + sign
+
+    body = [f"요청하신 {topic}{obj} 확인한 결과 공유드립니다."]
+    if bullets:
+        body.append(bullets)
+    elif core:
+        body.append(core)
+    else:
+        body.append("- 확인 결과: [수치·조치 내용 기입]")
+    body.append("이상 확인하였습니다. " + (ask_ext if ext else ask_int))
+    result = head + "\n\n".join(body) + sign
+
+    body = [f"보내주신 {topic} 건 확인했습니다.",
+            "본 건은 관련 담당자·유관부서 확인 후 " + (f"{due}까지 " if due else "") + "재회신드리겠습니다.",
+            "확인되는 대로 진행 상황을 공유드리겠습니다."]
+    forward = head + "\n\n".join(body) + sign
+
+    return {"attach": fix_honorific(attach), "result": fix_honorific(result), "forward": fix_honorific(forward)}
+
+
+def polish_draft(text: str, who: str = "", ext: bool = False) -> str:
+    """AI 가 쓴 초안 정리 — 인사말은 한 번만, 호칭은 '과장님', 서명은 한 번."""
+    t = fix_honorific(str(text or "").replace("\r", ""))
+    paras = [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
+    kept: list[str] = []
+    seen_greet = False
+    for p in paras:
+        lines: list[str] = []
+        for raw in p.split("\n"):
+            s = raw.strip()
+            if not s:
+                continue
+            if GREET_ONLY_RE.match(s):
+                if seen_greet:
+                    continue                     # 두 번째 인사말은 버린다
+                seen_greet = True
+                lines.append(s)
+                continue
+            if GREET_ANY_RE.search(s):
+                seen_greet = True
+            lines.append(s)
+        if lines:
+            kept.append("\n".join(lines))
+    body = "\n\n".join(kept).strip()
+    name, org = _owner_sign()
+    first = body.split("\n", 1)[0] if body else ""
+    if who and not (first.startswith(who) or GREET_ANY_RE.search(first[:40])):
+        head = f"{who}, 안녕하십니까." if ext else f"{who}, 안녕하세요."
+        if ext and org and name:
+            head += f"\n{org} {name}입니다."
+        body = head + ("\n\n" + body if body else "")
+    if name and not re.search(rf"{re.escape(name)}\s*(?:드림|배상)", body[-80:]):
+        body = (body + "\n\n감사합니다.\n\n" + name + " 드림" + (f"\n{org}" if ext and org else "")).strip()
+    return re.sub(r"\n{3,}", "\n\n", body).strip()
+
+
+def normalize_reply_drafts(drafts: dict | None, item: dict) -> dict:
+    """AI 초안을 새 3안 키로 옮기고 다듬는다. 빠진 안은 기본 초안으로 채운다.
+
+    v1.2.7 이전 초안(polite/factual/concise)이라도 알맹이(수치·품번·조치)가 있으면
+    그 내용을 살려 새 안에 담는다 — 말투만 바꾸는 초안으로 되돌아가지 않게.
+    """
+    src = drafts if isinstance(drafts, dict) else {}
+    ext = is_external(item.get("senderEmail") or "", item.get("sender") or "")
+    who = call_name(item.get("senderName") or item.get("sender") or "", item.get("senderEmail") or "")
+    legacy_core = ""
+    for k in TONE_KEYS:
+        lv = src.get(TONE_LEGACY[k])
+        if isinstance(lv, str) and lv.strip() and not _looks_empty_ack(lv):
+            cand = _draft_core(lv)
+            if len(cand) > len(legacy_core):
+                legacy_core = cand
+    base = build_reply_drafts(item, legacy_core)
+    out: dict = {}
+    for k in TONE_KEYS:
+        v = src.get(k)
+        out[k] = polish_draft(v, who, ext) if isinstance(v, str) and v.strip() else base[k]
+    return out
+
+
+def refresh_reply_drafts(items: list[dict]) -> int:
+    """이미 저장된 옛 3종 초안(말투만 다른 접수 멘트 · 인사말 중복)을 실무형 3안으로 바꾼다 (v1.2.8).
+
+    새 키(attach/result/forward)로 저장된 초안은 인사말 중복·호칭 띄어쓰기만 다듬는다.
+    사용자가 브라우저에서 직접 고친 문구는 data 에 저장되지 않으므로(localStorage) 건드리지 않는다.
+    """
+    n = 0
+    for it in items or []:
+        if it.get("archived"):
+            continue
+        cur = it.get("replyDrafts")
+        if not isinstance(cur, dict) or not cur:
+            continue
+        has_new = any(isinstance(cur.get(k), str) and cur.get(k).strip() for k in TONE_KEYS)
+        broken = any(_draft_has_dup_greeting(v) or RANK_NIM_RE.search(v)
+                     for v in cur.values() if isinstance(v, str))
+        if has_new and not broken:
+            continue
+        new = normalize_reply_drafts(cur, it)
+        if new != cur:
+            it["replyDrafts"] = new
+            n += 1
+    return n
+
+
 def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None) -> dict:
     body = clean_body(mail.get("bodyText") or "")
     core = strip_greeting(body) or body          # 인사말·소속 소개는 요약에서 뺀다
@@ -2012,8 +2347,9 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
     body = clean_body(mail.get("bodyText") or "")
     if body:
         item["bodyText"] = body[:2500]
-    if analysis.get("replyDrafts") and item["replyStatus"] == "needs_reply":
-        item["replyDrafts"] = analysis["replyDrafts"]
+    if item["replyStatus"] == "needs_reply":
+        # 실무형 3안(📎 자료 송부·✅ 조치 결과·👉 담당자 전달) — AI 초안이 없으면 기본값으로 채운다 (v1.2.8)
+        item["replyDrafts"] = normalize_reply_drafts(analysis.get("replyDrafts"), item)
     if mail.get("imagesData"):
         item["images"] = mail["imagesData"]
         item["imageCount"] = len(mail["imagesData"])
@@ -2167,7 +2503,8 @@ def sync(args: argparse.Namespace) -> dict:
     report["new_inbox"] = [{"mf_no": m["mf_no"], "subject": m["subject"], "receivedAt": m["receivedAt"]} for m in inbox]
     report["new_sent"] = [{"mf_no": m["mf_no"], "subject": m["subject"], "receivedAt": m["receivedAt"]} for m in sent]
 
-    if not inbox and not sent and not is_new and not contacts_added:
+    drafts_refreshed = refresh_reply_drafts(items)   # 옛 답장 초안 정리 (v1.2.8)
+    if not inbox and not sent and not is_new and not contacts_added and not drafts_refreshed:
         report["changed"] = False
         return report
 
@@ -2216,7 +2553,9 @@ def sync(args: argparse.Namespace) -> dict:
     refreshed = refresh_copied_summaries(items, contacts)   # 예전 '본문 복붙' 요약 → 3인칭 (v1.2.7)
     if refreshed:
         report["summariesRefreshed"] = refreshed
-    changed = bool(refreshed or added or report["replied"] or contacts_added
+    if drafts_refreshed:                      # 옛 답장 초안 3종 → 실무형 3안 (v1.2.8)
+        report["draftsRefreshed"] = drafts_refreshed
+    changed = bool(refreshed or drafts_refreshed or added or report["replied"] or contacts_added
                    or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)

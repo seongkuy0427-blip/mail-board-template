@@ -389,8 +389,10 @@ def run(pin: str, keep: bool) -> int:
     check("VIP 1-1 → 🔴 최상위", bool(a) and a["priority"] == 1 and a.get("vipRank") == 1,
           f"priority={a and a['priority']} label={a and a.get('vipLabel')}")
     if a:
+        rd = a.get("replyDrafts") or {}
         check("첨부 메타·답장 초안", a.get("attachments") == [{"name": "실적.xlsx", "size": "31.11 KB"}]
-              and "polite" in (a.get("replyDrafts") or {}), str(a.get("attachments")))
+              and {"attach", "result", "forward"} <= set(rd) and rd.get("attach"),
+              str(a.get("attachments")))
     b = items.get(f"m-{base + 2}")
     check("VIP 1-2 + To → 🔴", bool(b) and b["priority"] == 1 and b.get("vipLabel") == "1-2 주요",
           f"priority={b and b['priority']}")
@@ -641,6 +643,42 @@ def run(pin: str, keep: bool) -> int:
     check("요약 프롬프트에 본문 복붙 금지",
           "그대로 옮기지 않는다" in sm.SYSTEM_PROMPT and "제3자 보고체" in sm.SYSTEM_PROMPT,
           sm.SYSTEM_PROMPT.count("제3자 보고체"))
+
+    # v1.2.8 — 답장 문구는 말투 3종이 아니라 실무 상황 3안(자료 송부·조치 결과·담당자 전달)
+    draft_item = {"id": "m-x", "title": "RE: 26년 11월 KPI & BPD 자료 회신 요청",
+                  "senderName": "김태영 과장", "senderEmail": "tykim@chunil.co.kr",
+                  "actionItems": ["납입관리부 3개 항목 정리"], "dueDate": "2026-12-03",
+                  "attachments": [{"name": "KPI.xlsx", "size": "12KB"}]}
+    d3 = sm.build_reply_drafts(draft_item)
+    check("답장 3안 — 자료 송부·조치 결과·담당자 전달",
+          set(d3) == {"attach", "result", "forward"}
+          and "첨부 송부드립니다" in d3["attach"] and "KPI.xlsx" in d3["attach"]
+          and "확인한 결과 공유드립니다" in d3["result"]
+          and "재회신드리겠습니다" in d3["forward"] and "12/3(목)" in d3["forward"],
+          d3["forward"].splitlines()[0][:50])
+    ext3 = sm.build_reply_drafts(dict(draft_item, senderEmail="johhee.yeom@gm.com",
+                                      senderName="염주희 차장"))["attach"]
+    check("답장 말투 자동 — 외부는 격식체",
+          ext3.startswith("염주희 차장님, 안녕하십니까.") and "입니다." in ext3 and "안녕하세요" not in ext3,
+          ext3.splitlines()[0][:40])
+    shot = ("김태영 과장 님, 안녕하세요.\n안녕하세요.\n천일정기화물자동차(주) 납입1팀 김성규입니다.\n\n"
+            "2026년 11월 KPI 자료 회신 요청 확인했습니다.\n12/3(목)까지 회신드리겠습니다.\n\n감사합니다.\n\n김성규 드림")
+    fixed = sm.normalize_reply_drafts({"polite": shot}, draft_item)
+    check("답장 인사말 중복 제거 · '과장 님' → '과장님'",
+          all(t.count("안녕하세요") == 1 and "과장 님" not in t for t in fixed.values())
+          and fixed["attach"].startswith("김태영 과장님, 안녕하세요."),
+          fixed["attach"].splitlines()[0][:40])
+    legacy_items = [{"id": "m-y", "title": "PTR 막차 납입 일정 회신 요청", "replyStatus": "needs_reply",
+                     "senderName": "이방형 부장", "senderEmail": "bhlee@gm.com",
+                     "replyDrafts": {"polite": "확인했습니다. 회신드리겠습니다.",
+                                     "factual": "확인했습니다. 회신드리겠습니다.",
+                                     "concise": "확인했습니다. 회신드리겠습니다."}}]
+    check("저장된 옛 답장 초안 자동 정리",
+          sm.refresh_reply_drafts(legacy_items) == 1
+          and set(legacy_items[0]["replyDrafts"]) == {"attach", "result", "forward"}
+          and sm.refresh_reply_drafts(legacy_items) == 0
+          and "확인했습니다. 회신드리겠습니다." not in legacy_items[0]["replyDrafts"]["attach"],
+          legacy_items[0]["replyDrafts"]["forward"].splitlines()[0][:40])
 
     check("기본 Gemini 모델", sm.DEFAULT_MODEL == "gemini-3.8-flash", sm.DEFAULT_MODEL)
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
