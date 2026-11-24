@@ -1485,6 +1485,11 @@
     button.kpi-card:active, .seg button:active, .chip:active{transform:none !important}
     .row.leaving{transition:none !important; will-change:auto}
   }
+  /* ── 🔒 화면 잠금 (v1.2.16) — 정적 판은 기존 PIN 화면(gate)을 잠금 화면으로 쓴다 ── */
+  #gate.gate-on-lock #gateIdField, #gate.gate-on-lock .gate-opts{display:none}
+  #gate.gate-on-lock .gate-sub{color:var(--ink-2)}
+  #gate.gate-on-lock .gate-card{animation:none}
+
 </style>
 </head>
 <body>
@@ -1498,7 +1503,7 @@
     </div>
     <p class="gate-sub">천일정기화물자동차㈜ · 사내 웹메일 계정 로그인</p>
 
-    <div class="field">
+    <div class="field" id="gateIdField">
       <label class="flabel" for="loginId">사내 메일 아이디</label>
       <input class="gate-input" id="loginId" type="text" name="loginId" autocomplete="username"
              inputmode="email" spellcheck="false" autocapitalize="none" maxlength="64"
@@ -1506,7 +1511,7 @@
     </div>
 
     <div class="field">
-      <label class="flabel" for="pin">비밀번호</label>
+      <label class="flabel" for="pin" id="pinLabel">비밀번호</label>
       <input class="gate-input" id="pin" type="password" name="password" autocomplete="current-password"
              maxlength="64" placeholder="비밀번호 (현재 접속 키)" aria-label="비밀번호">
     </div>
@@ -1518,7 +1523,7 @@
 
     <button class="btn btn-primary btn-block" type="submit" id="unlockBtn">로그인</button>
     <div class="err" id="gateErr"></div>
-    <div class="gate-foot">※ 현재는 개인 암호화 키로 잠금 해제되며, 사내 메일 서버 연동 시 각 계정으로 자동 전환됩니다.</div>
+    <div class="gate-foot" id="gateNote">※ 현재는 개인 암호화 키로 잠금 해제되며, 사내 메일 서버 연동 시 각 계정으로 자동 전환됩니다.</div>
   </form>
 </div>
 
@@ -1561,13 +1566,15 @@
           </button>
           <div class="user-menu" id="userMenu" role="menu" aria-hidden="true">
             <div class="um-head"><b id="userMenuName">내 계정</b><span id="userMenuSub"></span></div>
+            <button type="button" class="um-item" id="lockBtn" role="menuitem"
+                    title="자리를 비울 때 화면을 즉시 잠급니다 (4자리 PIN)">🔒 화면 잠금</button>
             <button type="button" class="um-item" id="logoutBtn" role="menuitem">🚪 로그아웃</button>
           </div>
         </div>
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.15</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.16</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1800,7 +1807,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.15").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.16").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -1810,7 +1817,7 @@
   /* 저장소 접근자 — 포털 모드는 로그인 아이디별로 키를 나누는 LSK 를 따로 정의하지만,
      이 배포본(GitHub Pages)에는 사용자 구분이 없어 localStorage 를 그대로 쓴다. */
   const LSK = window.localStorage;
-  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", calMeta: "mb_cal_meta_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1" };
+  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", calMeta: "mb_cal_meta_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1", locked: "mb_locked_v1" };
   const AUTO_REFRESH_MS = 60 * 1000;
   /* 탭을 다시 열었을 때 이미 받아온 지 30초가 안 됐으면 중복 호출을 건너뛴다 */
   const RESUME_MIN_MS = 30 * 1000;
@@ -1985,6 +1992,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       } catch (e) {}
       $("gate").hidden = true; $("app").hidden = false;
       applyAccount(LOGIN_ID);
+      gateLockedClear();
       renderAll(); scheduleAuto(); paintBell(); notifyNewP1(); wxLoad(); briefTick();
       cyPaint(); cySync(false); caseWarm();
     } catch (e) {
@@ -2010,6 +2018,53 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     $("remember").checked = false;
     (gateRememberId() || $("loginId").value ? $("pin") : $("loginId")).focus();
   }
+
+  /* ---------------- 🔒 화면 잠금 (v1.2.16) ----------------
+     정적 GitHub Pages 판은 이미 4자리 PIN 잠금 화면(gate)을 쓰므로, 잠글 때 그 화면으로 돌아간다.
+     · 데이터 키(PIN)를 메모리에서 비우고, 4자리를 넣으면 바로 대시보드로 복귀한다.
+     · 잠금 여부는 localStorage(mb_locked_v1)에 남겨 새로고침(F5)해도 풀리지 않는다. */
+  function lockRemembered() { try { return localStorage.getItem(LS.locked) === "1"; } catch (e) { return false; } }
+  function gateLockedPaint(id) {
+    const g = $("gate"); if (!g) return;
+    g.classList.add("gate-on-lock");
+    const sub = document.querySelector("#gate .gate-sub");
+    if (sub) sub.textContent = "🔒 화면이 잠겨 있습니다 · 4자리 PIN을 입력하면 바로 돌아갑니다";
+    const btn = $("unlockBtn"); if (btn) btn.textContent = "잠금 해제";
+    if (id && $("loginId")) $("loginId").value = id;
+    const note = $("gateNote");
+    if (note) note.textContent = "※ 잠금 화면입니다. 자리를 비울 때는 그대로 두세요.";
+    const lab = $("pinLabel"); if (lab) lab.textContent = "잠금 PIN (4자리)";
+    const pin = $("pin"); if (pin) { pin.placeholder = "4자리 PIN"; try { pin.focus({ preventScroll: true }); } catch (e) { pin.focus(); } }
+  }
+  function gateLockedClear() {
+    try { localStorage.removeItem(LS.locked); } catch (e) {}
+    const g = $("gate"); if (g) g.classList.remove("gate-on-lock");
+    const btn = $("unlockBtn"); if (btn) btn.textContent = "로그인";
+    const lab = $("pinLabel"); if (lab) lab.textContent = "비밀번호";
+    const pin = $("pin"); if (pin) pin.placeholder = "비밀번호 (현재 접속 키)";
+  }
+  function lockScreenStatic() {
+    userMenuClose();
+    const id = LOGIN_ID || gateRememberId() || "";
+    try { localStorage.setItem(LS.locked, "1"); } catch (e) {}
+    lock();                       /* 데이터·PIN 을 메모리에서 비우고 PIN 화면으로 */
+    gateLockedPaint(id);
+    toast("화면을 잠갔습니다 — 4자리 PIN으로 풀 수 있습니다");
+  }
+  if ($("lockBtn")) $("lockBtn").addEventListener("click", lockScreenStatic);
+  if ($("pin")) {
+    $("pin").addEventListener("input", () => {
+      if (!lockRemembered()) return;
+      const v = String($("pin").value || "").trim();
+      if (!/^[0-9]{4}$/.test(v)) return;
+      setTimeout(() => {
+        if (!lockRemembered() || String($("pin").value || "").length !== 4) return;
+        try { $("gateForm").requestSubmit(); }
+        catch (e) { $("gateForm").dispatchEvent(new Event("submit", { cancelable: true })); }
+      }, 90);
+    });
+  }
+
 
   /* ---------------- 동기화 ---------------- */
   function stamp(d) {
@@ -6010,7 +6065,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   $("gateForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const id = $("loginId").value.trim();
+    const id = ($("loginId").value || gateRememberId() || "").trim();
     const pin = $("pin").value.trim();
     $("gateErr").textContent = "";
     if (!id) { $("gateErr").textContent = "사내 메일 아이디를 입력하세요"; $("loginId").focus(); return; }
@@ -7079,12 +7134,13 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   /* ---------------- 시작 ---------------- */
   (async function boot() {
     gatePrefill();
+    if (lockRemembered()) gateLockedPaint(gateRememberId() || "");
     let saved = null;
     try {
       localStorage.removeItem(LS.pin);          /* 구버전 자동 로그인 키는 무시하고 지운다 */
       saved = localStorage.getItem(LS.pin2);    /* 이번 버전에서 직접 체크해 둔 경우에만 자동 진입 */
     } catch (e) {}
-    if (saved) {
+    if (saved && !lockRemembered()) {
       try {
         ENC = await fetchEnc();
         DATA = await decryptData(ENC, b64dec(saved));

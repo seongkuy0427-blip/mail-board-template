@@ -1390,6 +1390,47 @@
     border-radius:50%; display:inline-block; animation:portalSpin .9s linear infinite}
   @keyframes portalSpin{to{transform:rotate(360deg)}}
   @media (prefers-reduced-motion:reduce){ .seedspin{animation:none} }
+  /* ── 🔒 화면 잠금 (v1.2.16) — 자리 비울 때 계정 메뉴에서 한 번에 덮는다 ── */
+  body.scr-locked{overflow:hidden}
+  body.scr-locked #app{visibility:hidden !important}
+  #screenLock{position:fixed; inset:0; z-index:120; display:none; align-items:center; justify-content:center;
+    padding:18px; background:#FAFAFA}
+  #screenLock.on{display:flex}
+  .sl-card{width:min(352px,100%); background:#fff; border:1px solid var(--line); border-radius:16px;
+    padding:26px 22px 16px; text-align:center; box-shadow:0 18px 50px rgba(9,9,11,.09)}
+  .sl-lock{font-size:27px; line-height:1}
+  .sl-card h2{margin:11px 0 0; font-size:15.6px; font-weight:650; letter-spacing:-.02em; color:var(--ink)}
+  .sl-sub{margin:7px 0 0; font-size:12.2px; color:var(--ink-3); line-height:1.55; letter-spacing:-.01em}
+  .sl-pinbox{position:relative; display:flex; justify-content:center; align-items:center; gap:13px;
+    margin:20px 0 2px; padding:12px 0; cursor:text; border-radius:12px; background:#FAFAFA; border:1px solid var(--line)}
+  .sl-pinbox input{position:absolute; inset:0; width:100%; height:100%; opacity:0; border:0; outline:0;
+    background:transparent; font-size:16px; color:transparent; caret-color:transparent; text-align:center}
+  .sl-pinbox i{display:block; width:13px; height:13px; border-radius:50%; background:#E4E4E7;
+    transition:background .12s ease, transform .12s ease}
+  .sl-pinbox i.on{background:var(--brand); transform:scale(1.1)}
+  .sl-card.err-shake{animation:slShake .38s ease}
+  @keyframes slShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}
+    30%,50%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}}
+  .sl-err{min-height:17px; margin-top:8px; font-size:11.8px; font-weight:600; color:#B4232B; letter-spacing:-.01em}
+  .sl-forgot{display:block; width:100%; margin-top:10px; padding:6px 2px; border:0; background:none; cursor:pointer;
+    font-family:inherit; font-size:11.2px; color:var(--ink-3); text-decoration:underline; text-underline-offset:2px}
+  .sl-forgot:hover{color:var(--ink-2)}
+  @media (max-width:430px){
+    #screenLock{padding:14px}
+    .sl-card{padding:22px 16px 12px}
+  }
+  @media (prefers-reduced-motion:reduce){ .sl-card.err-shake{animation:none} .sl-pinbox i{transition:none} }
+
+  /* ── 🔑 잠금 PIN 설정·변경 모달 (v1.2.16) ── */
+  #lockPinModal{position:fixed; inset:0; z-index:82; display:none; align-items:center; justify-content:center; padding:16px}
+  #lockPinModal.on{display:flex}
+  .lp-card{width:min(384px,100%); height:auto; max-height:min(92vh,520px)}
+  .lp-body{padding:16px; overflow:auto}
+  .lp-desc{margin:0 0 14px; font-size:12.4px; color:var(--ink-2); line-height:1.55; letter-spacing:-.01em}
+  .lp-in{margin-bottom:13px; padding:11px 12px; letter-spacing:7px; font-size:18px; text-align:center}
+  .lp-note{margin:2px 0 0; font-size:11.1px; color:var(--ink-3); line-height:1.55; letter-spacing:-.01em}
+  @media (max-width:430px){ #lockPinModal{padding:10px} }
+
 </style>
 </head>
 <body>
@@ -1432,6 +1473,26 @@
   </form>
 </div>
 
+<!-- ============ 🔒 화면 잠금 (v1.2.16) ============
+     자리 비울 때 [계정 ▾] → 🔒 화면 잠금 한 번으로 화면을 덮는다.
+     잠긴 동안 뒤의 대시보드는 visibility:hidden — 메일 목록·본문이 보이지 않는다.
+     새로고침(F5)해도 잠금은 그대로 유지된다. -->
+<div id="screenLock" role="dialog" aria-modal="true" aria-labelledby="slTitle" aria-hidden="true">
+  <div class="sl-card" id="slCard">
+    <div class="sl-lock" aria-hidden="true">🔒</div>
+    <h2 id="slTitle">화면이 잠겨 있습니다</h2>
+    <p class="sl-sub" id="slSub">4자리 PIN을 입력하면 바로 돌아갑니다</p>
+    <label class="sl-pinbox" id="slPinBox" title="4자리 PIN 입력">
+      <input id="slPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4"
+             autocomplete="off" autocapitalize="none" aria-label="4자리 잠금 PIN">
+      <i></i><i></i><i></i><i></i>
+    </label>
+    <div class="sl-err" id="slErr" role="alert"></div>
+    <button type="button" class="btn btn-primary btn-block" id="slUnlock">잠금 해제</button>
+    <button type="button" class="sl-forgot" id="slForgot">PIN을 잊으셨나요? 로그아웃 후 다시 로그인</button>
+  </div>
+</div>
+
 <!-- ============ 대시보드 ============ -->
 <div id="app" hidden>
   <!-- ============ 🎨 왼쪽 여백 감성 배너 (와이드 PC 전용 · 장식) ============ -->
@@ -1469,13 +1530,17 @@
           </button>
           <div class="user-menu" id="userMenu" role="menu" aria-hidden="true">
             <div class="um-head"><b id="userMenuName">내 계정</b><span id="userMenuSub"></span></div>
+            <button type="button" class="um-item" id="lockBtn" role="menuitem"
+                    title="자리를 비울 때 화면을 즉시 잠급니다 (4자리 PIN)">🔒 화면 잠금</button>
+            <button type="button" class="um-item" id="lockPinBtn" role="menuitem"
+                    title="잠금 화면을 풀 때 쓰는 4자리 PIN을 바꿉니다">🔑 잠금 PIN 변경</button>
             <button type="button" class="um-item" id="logoutBtn" role="menuitem">🚪 로그아웃</button>
           </div>
         </div>
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.15</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.16</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1568,6 +1633,34 @@
 <div class="toast" id="toast"></div>
 <!-- 🏷️ 목록 행 분류 드롭다운 (v1.2.14) — 행의 [🔴 즉시 ▾] 를 누르면 이 자리에 뜬다 -->
 <div id="rankPop" class="rk-pop" role="menu" aria-label="앞으로 자동 분류" hidden></div>
+
+<!-- ============ 🔑 잠금 PIN 설정·변경 (v1.2.16) ============ -->
+<div id="lockPinModal" role="dialog" aria-modal="true" aria-labelledby="lpTitle" aria-hidden="true">
+  <div class="rm-back" data-lp-close="1"></div>
+  <div class="rm-card lp-card">
+    <div class="rm-head">
+      <h2 id="lpTitle">🔒 간편 잠금 PIN 설정</h2>
+      <button type="button" class="rm-x" id="lpX" aria-label="닫기">✕</button>
+    </div>
+    <div class="lp-body">
+      <p class="lp-desc" id="lpDesc">간편 잠금 해제용 4자리 숫자 PIN을 설정해 주세요.</p>
+      <label class="flabel" for="lpNew">새 PIN (숫자 4자리)</label>
+      <input class="gate-input lp-in" id="lpNew" type="password" inputmode="numeric" maxlength="4"
+             autocomplete="new-password" placeholder="••••" aria-label="새 PIN 4자리">
+      <label class="flabel" for="lpNew2">한 번 더</label>
+      <input class="gate-input lp-in" id="lpNew2" type="password" inputmode="numeric" maxlength="4"
+             autocomplete="new-password" placeholder="••••" aria-label="새 PIN 확인">
+      <div class="sl-err" id="lpErr" role="alert"></div>
+      <p class="lp-note" id="lpNote">이 PIN은 화면을 풀 때만 쓰고, 서버에는 되돌릴 수 없는 암호로만 저장됩니다.
+        잊으시면 로그아웃 후 다시 로그인해 새로 정할 수 있습니다.</p>
+    </div>
+    <div class="rm-foot">
+      <span class="rm-sum" id="lpSum"></span>
+      <button type="button" class="btn" data-lp-close="1">취소</button>
+      <button type="button" class="btn btn-primary" id="lpSave">설정하고 잠그기</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============ ⚙️ 분류 규칙 설정 (이 기기에서만 저장) ============ -->
 <div id="rulesModal" role="dialog" aria-modal="true" aria-label="분류 규칙 설정" aria-hidden="true">
@@ -1688,14 +1781,14 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.15").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.16").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
     b.textContent = "v" + APP_VER;
     b.title = "현재 화면 버전 v" + APP_VER + (window.__PORTAL_MODE__ ? " · 사내 포털 서버" : " · GitHub Pages");
   })();
-  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", calMeta: "mb_cal_meta_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1" };
+  const LS = { pin: "mb_pin_v1", pin2: "mb_pin_v2", loginId: "mb_login_id_v1", state: "mb_state_v1", cal: "mb_calopen_v1", bell: "mb_bell_v1", seen: "mb_seen_p1_v1", seenAll: "mb_seen_all_v1", cal2: "mb_cal_items_v1", cus: "mb_cal_custom_v1", calMeta: "mb_cal_meta_v1", pinList: "mb_pinned_v1", wx: "mb_wxopen_v1", rules: "mb_rules_v1", brief: "mb_brief_hide_v1", locked: "mb_locked_v1" };
 
   /* ================= 포털 모드 (팀 공용 통합 서버) =================
      server.py 가 내려줄 때 window.__PORTAL_MODE__ = true 가 먼저 실행된다.
@@ -1903,6 +1996,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   /* 로그아웃 — 자동 로그인 기억값을 지우고 로그인 화면으로 돌아간다 */
   function logout() {
     try { LSK.removeItem(LS.pin); LSK.removeItem(LS.pin2); } catch (e) {}
+    lockRemember(false); LK.on = false; LK.fails = 0;
     lock();
     toast("로그아웃했습니다");
   }
@@ -1918,6 +2012,196 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     $("remember").checked = false;
     (gateRememberId() || $("loginId").value ? $("pin") : $("loginId")).focus();
   }
+
+  /* ---------------- 🔒 화면 잠금 (v1.2.16) ----------------
+     자리를 비울 때 [계정 ▾] → 🔒 화면 잠금 한 번으로 화면을 덮는다.
+     · 4자리 PIN 해시는 서버(data/users/{uid}/state.json 의 lock)에만 두고 /api/lock 으로 검증한다.
+     · 잠금 여부는 이 브라우저에도 남겨(mb_locked_v1) 새로고침(F5)해도 잠금 화면이 풀리지 않는다.
+     · PIN을 잊으면 로그아웃 후 다시 로그인해 새 PIN을 정한다. */
+  const LK = { on: false, busy: false, mode: "set", fails: 0 };
+  function pin4(v) { return /^[0-9]{4}$/.test(String(v || "")); }
+  function lockRemembered() { try { return LSK.getItem(LS.locked) === "1"; } catch (e) { return false; } }
+  function lockRemember(on) { try { if (on) LSK.setItem(LS.locked, "1"); else LSK.removeItem(LS.locked); } catch (e) {} }
+  async function lockApi(body) {
+    const res = await fetch("/api/lock", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {})
+    });
+    let j = {}; try { j = await res.json(); } catch (e) { j = {}; }
+    if (!res.ok || !j.ok) {
+      const err = new Error(j.message || "잠금 요청을 처리하지 못했습니다");
+      err.code = j.code; err.status = res.status; throw err;
+    }
+    return j;
+  }
+  async function lockInfo() {
+    try {
+      const res = await fetch("/api/lock", { cache: "no-store" });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) { return null; }
+  }
+  function slPaint() {
+    const inp = $("slPin");
+    const n = inp ? String(inp.value || "").replace(/\D/g, "").slice(0, 4) : "";
+    const dots = document.querySelectorAll("#slPinBox i");
+    for (let i = 0; i < dots.length; i++) dots[i].classList.toggle("on", i < n.length);
+  }
+  function slErr(msg) { const e = $("slErr"); if (e) e.textContent = msg || ""; }
+  function slShake() {
+    const c = $("slCard"); if (!c) return;
+    c.classList.remove("err-shake"); void c.offsetWidth; c.classList.add("err-shake");
+  }
+  function lockShow(sub) {
+    LK.on = true;
+    if (typeof briefIsOpen === "function" && briefIsOpen()) briefClose("");
+    closeDrawer();
+    if (typeof cyClose === "function") cyClose();
+    hideAlertBanner();            /* 탭 제목·상단 카드에 메일 제목이 남지 않게 */
+    userMenuClose();
+    if (typeof rmIsOpen === "function" && rmIsOpen()) rmClose();
+    lpClose();
+    const ov = $("screenLock");
+    if (ov) { ov.classList.add("on"); ov.setAttribute("aria-hidden", "false"); }
+    document.body.classList.add("scr-locked");
+    if (sub && $("slSub")) $("slSub").textContent = sub;
+    slErr("");
+    const inp = $("slPin");
+    if (inp) {
+      inp.value = ""; slPaint();
+      setTimeout(() => { try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); } }, 50);
+    }
+    clearInterval(autoTimer);     /* 잠금 중에는 자동 갱신이 새 메일 제목을 띄우지 않게 */
+  }
+  function lockHide() {
+    LK.on = false; LK.busy = false;
+    const ov = $("screenLock");
+    if (ov) { ov.classList.remove("on"); ov.setAttribute("aria-hidden", "true"); }
+    document.body.classList.remove("scr-locked");
+    const inp = $("slPin"); if (inp) inp.value = "";
+    slPaint(); slErr("");
+  }
+  async function lockEngage() {
+    lockRemember(true);
+    try { await lockApi({ action: "lock" }); } catch (e) {}
+    lockShow("4자리 PIN을 입력하면 바로 돌아갑니다");
+  }
+  async function lockNow() {
+    userMenuClose();
+    const info = await lockInfo();
+    if (!info) { toast("서버에 연결하지 못해 잠그지 못했습니다 — 잠시 후 다시 시도해 주세요"); return; }
+    if (!info.hasPin) { lpOpen("set"); return; }   /* 처음이면 PIN부터 정하고 바로 잠근다 */
+    await lockEngage();
+  }
+  async function lockResume() {
+    LK.fails = 0;
+    lockHide();
+    if (!DATA) {                  /* F5 로 들어와 잠긴 경우 — 풀린 뒤에 보드를 받는다 */
+      const g = $("gate"); if (g) g.hidden = true;
+      seedShow("내 보드를 불러오는 중…", 8, "");
+      try { await ptPull(); reloadLocalState(); await portalEnter({ id: PORTAL_USER }); }
+      catch (e) { seedHide(); logout(); }
+      return;
+    }
+    $("app").hidden = false; $("gate").hidden = true;
+    renderAll(); scheduleAuto(); paintBell(); briefTick();
+    toast("잠금을 풀었습니다");
+  }
+  async function slTryUnlock() {
+    if (LK.busy) return;
+    const inp = $("slPin");
+    const v = String(inp ? inp.value : "").replace(/\D/g, "");
+    if (v.length !== 4) { slErr("4자리 숫자를 입력하세요"); slShake(); return; }
+    LK.busy = true; slErr("확인 중…");
+    try {
+      await lockApi({ action: "unlock", pin: v });
+      lockRemember(false);
+      await lockResume();
+    } catch (e) {
+      LK.fails += 1;
+      slErr(e.message || "PIN이 일치하지 않습니다");
+      slShake();
+      if (inp) { inp.value = ""; slPaint(); try { inp.focus({ preventScroll: true }); } catch (err) { inp.focus(); } }
+    } finally { LK.busy = false; }
+  }
+  /* ── 🔑 PIN 설정·변경 모달 ── */
+  function lpErr(msg) { const e = $("lpErr"); if (e) e.textContent = msg || ""; }
+  function lpClose() {
+    const m = $("lockPinModal"); if (!m) return;
+    m.classList.remove("on"); m.setAttribute("aria-hidden", "true");
+    const a = $("lpNew"), b = $("lpNew2"); if (a) a.value = ""; if (b) b.value = "";
+    lpErr("");
+  }
+  function lpOpen(mode) {
+    LK.mode = mode === "change" ? "change" : "set";
+    userMenuClose();
+    const t = $("lpTitle"), d = $("lpDesc"), s = $("lpSave");
+    if (LK.mode === "change") {
+      if (t) t.textContent = "🔑 잠금 PIN 변경";
+      if (d) d.textContent = "새로 쓸 4자리 숫자 PIN을 입력해 주세요. 지금 로그인한 상태라 바로 바꿀 수 있습니다.";
+      if (s) s.textContent = "변경";
+    } else {
+      if (t) t.textContent = "🔒 간편 잠금 PIN 설정";
+      if (d) d.textContent = "간편 잠금 해제용 4자리 숫자 PIN을 설정해 주세요. 저장하면 바로 잠깁니다.";
+      if (s) s.textContent = "설정하고 잠그기";
+    }
+    const a = $("lpNew"), b = $("lpNew2"); if (a) a.value = ""; if (b) b.value = "";
+    lpErr("");
+    const m = $("lockPinModal");
+    if (m) { m.classList.add("on"); m.setAttribute("aria-hidden", "false"); }
+    setTimeout(() => { const el = $("lpNew"); if (el) { try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } } }, 60);
+  }
+  async function lpSave() {
+    const a = String($("lpNew") ? $("lpNew").value : "").replace(/\D/g, "");
+    const b = String($("lpNew2") ? $("lpNew2").value : "").replace(/\D/g, "");
+    if (!pin4(a)) { lpErr("숫자 4자리를 입력해 주세요"); return; }
+    if (a !== b) { lpErr("두 번 입력한 PIN이 다릅니다"); return; }
+    const btn = $("lpSave"); if (btn) btn.disabled = true;
+    lpErr("");
+    try {
+      if (LK.mode === "change") {
+        await lockApi({ action: "change", newPin: a });
+        lpClose(); toast("잠금 PIN을 바꿨습니다");
+      } else {
+        try { await lockApi({ action: "set", pin: a }); }
+        catch (e) { if (e.code === "exists") await lockApi({ action: "change", newPin: a }); else throw e; }
+        lpClose();
+        await lockEngage();       /* 저장한 뒤 즉시 잠금 */
+      }
+    } catch (e) { lpErr(e.message || "저장하지 못했습니다"); }
+    finally { if (btn) btn.disabled = false; }
+  }
+  if ($("lockBtn")) $("lockBtn").addEventListener("click", () => { userMenuClose(); lockNow(); });
+  if ($("lockPinBtn")) $("lockPinBtn").addEventListener("click", async () => {
+    userMenuClose();
+    const info = await lockInfo();
+    lpOpen(info && info.hasPin ? "change" : "set");
+  });
+  if ($("slUnlock")) $("slUnlock").addEventListener("click", slTryUnlock);
+  if ($("slPinBox")) $("slPinBox").addEventListener("click", () => { const el = $("slPin"); if (el) el.focus(); });
+  if ($("slPin")) {
+    $("slPin").addEventListener("input", (e) => {
+      const el = e.target;
+      el.value = String(el.value || "").replace(/\D/g, "").slice(0, 4);
+      slPaint(); slErr("");
+      if (el.value.length === 4 && !LK.busy) setTimeout(slTryUnlock, 80);   /* 엔터 없이 4자리에서 바로 */
+    });
+    $("slPin").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); slTryUnlock(); } });
+  }
+  if ($("slForgot")) $("slForgot").addEventListener("click", () => {
+    lockRemember(false); lockHide(); logout();
+  });
+  if ($("lockPinModal")) {
+    $("lockPinModal").addEventListener("click", (e) => {
+      if (e.target.id === "lpX" || e.target.closest("[data-lp-close]")) { lpClose(); return; }
+      if (e.target.id === "lpSave") { lpSave(); return; }
+    });
+  }
+  ["lpNew", "lpNew2"].forEach((id) => {
+    const el = $(id); if (!el) return;
+    el.addEventListener("input", () => { el.value = String(el.value || "").replace(/\D/g, "").slice(0, 4); });
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lpSave(); } });
+  });
+
 
   /* ---------------- 동기화 ---------------- */
   function stamp(d) {
@@ -7075,6 +7359,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       if (!res.ok || !j.ok) throw new Error(j.message || "아이디 또는 비밀번호가 맞지 않습니다");
       PORTAL_USER = j.id || String(id).toLowerCase();
       LSK.setUser(PORTAL_USER);
+      lockRemember(false);
       try { if ($("rememberId").checked) _RAWLS.setItem(LS.loginId, PORTAL_USER); else _RAWLS.removeItem(LS.loginId); } catch (e) {}
       seedShow("내 보드를 불러오는 중…", 8, "");
       await ptPull();
@@ -7175,6 +7460,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         const me = await res.json();
         if (me && me.loggedIn && me.id) {
           PORTAL_USER = me.id; LSK.setUser(me.id);
+          if (lockRemembered()) { lockShow("4자리 PIN을 입력하면 바로 돌아갑니다"); return; }
           if (idf) idf.value = me.id;
           seedShow("내 보드를 불러오는 중…", 6, "");
           await ptPull();

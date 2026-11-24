@@ -40,6 +40,7 @@ import base64
 import datetime as dt
 import gzip
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -70,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.15"
+VERSION = "1.2.16"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -2060,8 +2061,9 @@ class PortalHandler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
                    "application/json; charset=utf-8", **kw)
 
-    def _err(self, code: int, message: str, **extra: Any) -> None:
-        self._json(code, {"ok": False, "message": message, **extra})
+    def _err(self, status: int, message: str, **extra: Any) -> None:
+        # extra 의 code= 는 응답 본문의 기계용 사유 코드(HTTP status 와 다름) — 첫 인자 이름과 겹치지 않게 status 로 받는다
+        self._json(status, {"ok": False, "message": message, **extra})
 
     def _read_body_raw(self) -> bytes:
         """요청 본문을 끝까지 읽는다 — 읽지 않고 남기면 keep-alive 연결에서 다음 요청으로 오인된다."""
@@ -2160,6 +2162,13 @@ class PortalHandler(BaseHTTPRequestHandler):
                     return
                 self._json(HTTPStatus.OK, {"ok": True, **load_state(uid)})
                 return
+            if path == "/api/lock":
+                # 🔒 화면 잠금 상태·PIN 유무 — PIN 해시는 절대 내려보내지 않는다
+                uid = self._require_user()
+                if not uid:
+                    return
+                self._json(HTTPStatus.OK, {"ok": True, **lock_info(uid)})
+                return
             if path.startswith("/api/"):
                 self._err(HTTPStatus.NOT_FOUND, "없는 API 입니다")
                 return
@@ -2182,8 +2191,14 @@ class PortalHandler(BaseHTTPRequestHandler):
                 self._api_login()
                 return
             if path == "/api/logout":
+                s = self._session()
                 sid = self._sid()
                 drop_session(sid)
+                if s and s.get("user"):
+                    try:
+                        lock_end_session(s["user"])     # 로그아웃하면 화면 잠금 표시도 끝난다
+                    except Exception:  # noqa: BLE001 - 로그아웃은 반드시 되어야 한다
+                        pass
                 self._json(HTTPStatus.OK, {"ok": True},
                            extra={"Set-Cookie": f"{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
                 return
@@ -2205,6 +2220,12 @@ class PortalHandler(BaseHTTPRequestHandler):
                 if not uid:
                     return
                 self._api_state(uid)
+                return
+            if path == "/api/lock":
+                uid = self._require_user()
+                if not uid:
+                    return
+                self._api_lock(uid)
                 return
             self._err(HTTPStatus.NOT_FOUND, "없는 API 입니다")
         except (BrokenPipeError, ConnectionResetError):
@@ -2268,6 +2289,7 @@ class PortalHandler(BaseHTTPRequestHandler):
                          firstLoginAt=meta.get("firstLoginAt") or stamp(),
                          lastLogin=stamp(), email=f"{uid}@{sm.DOMAIN}")
         sid = create_session(uid, remember)
+        lock_end_session(uid)      # 🔒 새로 로그인했으면 잠금 표시를 푼다(간편 PIN 해시는 그대로 둔다)
         board = read_json(user_path(uid, "board.json"), None)
         pending = not (isinstance(board, dict) and board.get("items"))
         start_sync(uid, "seed" if pending else "login", force=True)
@@ -2387,6 +2409,60 @@ class PortalHandler(BaseHTTPRequestHandler):
                     "no_board": HTTPStatus.CONFLICT}.get(str(result.get("code")), HTTPStatus.BAD_REQUEST)
         self._json(code, result)
 
+    def _api_lock(self, uid: str) -> None:
+        """🔒 화면 잠금 — PIN 설정·검증·변경·잠금 상태.
+
+        PIN 평문은 저장도 응답도 하지 않는다(PBKDF2-SHA256 해시만). 화면은 이 응답의
+        hasPin·locked 만 보고, 실제 대조는 서버 안에서 한다.
+        """
+        try:
+            body = self._body_json(limit=4096)
+        except ValueError:
+            body = {}
+        action = str(body.get("action") or "info").strip().lower()
+        if action in ("", "info"):
+            self._json(HTTPStatus.OK, {"ok": True, **lock_info(uid)})
+            return
+        if action == "lock":
+            self._json(HTTPStatus.OK, {"ok": True, **lock_set_state(uid, True)})
+            return
+        if action == "unlock":
+            pin = str(body.get("pin") or "").strip()
+            if not LOCK_PIN_RE.match(pin):
+                self._err(HTTPStatus.BAD_REQUEST, "4자리 숫자 PIN을 입력해 주세요", code="bad_pin")
+                return
+            if not lock_info(uid)["hasPin"]:
+                self._err(HTTPStatus.CONFLICT, "아직 잠금 PIN이 없습니다 — 먼저 PIN을 설정해 주세요", code="needs_set")
+                return
+            if lock_fail_count(uid) >= LOCK_FAIL_MAX:
+                self._err(HTTPStatus.TOO_MANY_REQUESTS,
+                          "PIN을 여러 번 틀렸습니다. 로그아웃 후 다시 로그인해 주세요", code="too_many")
+                return
+            if not lock_check_pin(uid, pin):
+                lock_record_fail(uid)
+                self._err(HTTPStatus.FORBIDDEN, "PIN이 일치하지 않습니다", code="mismatch")
+                return
+            self._json(HTTPStatus.OK, {"ok": True, **lock_set_state(uid, False)})
+            return
+        if action in ("set", "change"):
+            raw = body.get("newPin") if action == "change" else body.get("pin")
+            if raw is None:
+                raw = body.get("pin")
+            pin = str(raw or "").strip()
+            if not LOCK_PIN_RE.match(pin):
+                self._err(HTTPStatus.BAD_REQUEST, "4자리 숫자 PIN을 입력해 주세요", code="bad_pin")
+                return
+            if action == "set":
+                if not lock_set_pin(uid, pin):
+                    self._err(HTTPStatus.CONFLICT,
+                              "이미 잠금 PIN이 있습니다 — [🔑 잠금 PIN 변경]을 써 주세요", code="exists")
+                    return
+            else:
+                lock_set_pin(uid, pin, replace=True)
+            self._json(HTTPStatus.OK, {"ok": True, **lock_info(uid)})
+            return
+        self._err(HTTPStatus.BAD_REQUEST, "알 수 없는 잠금 요청입니다", code="bad_action")
+
     def _api_state(self, uid: str) -> None:
         try:
             body = self._body_json(limit=MAX_STATE_BYTES)
@@ -2417,7 +2493,11 @@ class PortalHandler(BaseHTTPRequestHandler):
                 sections[name] = {"t": t, "raw": raw}
                 changed += 1
         if changed:
-            state = {"sections": sections, "updatedAt": stamp()}
+            # 🔒 lock(화면 잠금 PIN 해시·잠금 여부)는 이 요청이 건드리는 값이 아니므로 그대로 보존한다
+            prev = read_json(state_path(uid), {}) or {}
+            state = dict(prev) if isinstance(prev, dict) else {}
+            state["sections"] = sections
+            state["updatedAt"] = stamp()
             atomic_write_json(state_path(uid), state, mode=0o600)
         self._json(HTTPStatus.OK, {"ok": True, **load_state(uid)})
 
@@ -2487,6 +2567,103 @@ def load_state(uid: str) -> dict:
     sections = rec.get("sections") if isinstance(rec, dict) else None
     return {"sections": sections if isinstance(sections, dict) else {},
             "updatedAt": (rec.get("updatedAt") if isinstance(rec, dict) else "") or ""}
+
+
+# ────────────────────────────────────────────────────────────── 🔒 화면 잠금 (v1.2.16)
+#  자리를 비울 때 화면을 덮고 4자리 PIN 으로 바로 푸는 기능.
+#  state.json 의 `lock` 에 PBKDF2-SHA256(솔트 + 12만 회) 해시로만 남긴다 — 평문·복호화 가능한 값은 저장하지 않는다.
+#  잠금 여부(locked)도 같은 곳에 두어, 화면이 F5·다른 기기에서 상태를 확인할 수 있다.
+LOCK_ITER = 120_000
+LOCK_PIN_RE = re.compile(r"^[0-9]{4}$")
+_LOCK_FAILS: dict[str, list[float]] = {}      # uid → 최근 실패 시각들(메모리, 재시작하면 비운다)
+LOCK_FAIL_WINDOW = 10 * 60                     # 초 — 이 시간 안의 실패만 센다
+LOCK_FAIL_MAX = 10                             # 10회를 넘으면 잠시 막는다(서버 경유 무차별 대입 방지)
+
+
+def lock_record(uid: str) -> dict:
+    rec = read_json(state_path(uid), {}) or {}
+    got = rec.get("lock") if isinstance(rec, dict) else None
+    return got if isinstance(got, dict) else {}
+
+
+def lock_info(uid: str) -> dict:
+    """화면에 내려도 되는 잠금 정보 — 해시·솔트는 넣지 않는다."""
+    got = lock_record(uid)
+    return {"hasPin": bool(got.get("hash") and got.get("salt")),
+            "locked": bool(got.get("locked")),
+            "updatedAt": str(got.get("updatedAt") or ""),
+            "lockedAt": str(got.get("lockedAt") or "")}
+
+
+def _lock_write(uid: str, patch: dict) -> dict:
+    """state.json 의 lock 만 갱신한다 — sections(확인·고정·캘린더·규칙)는 건드리지 않는다."""
+    rec = read_json(state_path(uid), {}) or {}
+    if not isinstance(rec, dict):
+        rec = {}
+    got = rec.get("lock") if isinstance(rec.get("lock"), dict) else {}
+    got.update(patch)
+    rec["lock"] = got
+    atomic_write_json(state_path(uid), rec, mode=0o600)
+    return got
+
+
+def lock_hash(pin: str, salt_hex: str = "", iterations: int = LOCK_ITER) -> tuple[str, str, int]:
+    salt = bytes.fromhex(salt_hex) if salt_hex else os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", str(pin).encode("utf-8"), salt, int(iterations), dklen=32)
+    return digest.hex(), salt.hex(), int(iterations)
+
+
+def lock_set_pin(uid: str, pin: str, *, replace: bool = False) -> bool:
+    """4자리 PIN 저장. 이미 있으면 replace=False 일 때 덮어쓰지 않고 False."""
+    got = lock_record(uid)
+    if got.get("hash") and not replace:
+        return False
+    digest, salt, iterations = lock_hash(pin)
+    _lock_write(uid, {"hash": digest, "salt": salt, "iter": iterations, "updatedAt": stamp()})
+    _LOCK_FAILS.pop(uid, None)
+    return True
+
+
+def lock_check_pin(uid: str, pin: str) -> bool:
+    got = lock_record(uid)
+    if not got.get("hash") or not got.get("salt"):
+        return False
+    try:
+        iterations = int(got.get("iter") or LOCK_ITER)
+    except (TypeError, ValueError):
+        iterations = LOCK_ITER
+    digest, _, _ = lock_hash(pin, str(got.get("salt")), iterations)
+    return hmac.compare_digest(digest, str(got.get("hash") or ""))
+
+
+def lock_set_state(uid: str, locked: bool) -> dict:
+    patch: dict[str, Any] = {"locked": bool(locked)}
+    patch["lockedAt" if locked else "unlockedAt"] = stamp()
+    _lock_write(uid, patch)
+    if not locked:
+        _LOCK_FAILS.pop(uid, None)
+    return lock_info(uid)
+
+
+def lock_end_session(uid: str) -> None:
+    """전체 비밀번호로 새로 로그인·로그아웃했으면 화면 잠금 표시를 푼다(PIN 해시는 그대로)."""
+    if lock_record(uid).get("locked"):
+        lock_set_state(uid, False)
+
+
+def lock_fail_count(uid: str) -> int:
+    now = time.time()
+    rows = [t for t in _LOCK_FAILS.get(uid, []) if now - t < LOCK_FAIL_WINDOW]
+    if rows:
+        _LOCK_FAILS[uid] = rows
+    else:
+        _LOCK_FAILS.pop(uid, None)
+    return len(rows)
+
+
+def lock_record_fail(uid: str) -> int:
+    _LOCK_FAILS.setdefault(uid, []).append(time.time())
+    return lock_fail_count(uid)
 
 
 # ────────────────────────────────────────────────────────────── 서버 기동
