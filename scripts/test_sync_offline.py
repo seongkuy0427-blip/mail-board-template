@@ -785,6 +785,62 @@ def run(pin: str, keep: bool) -> int:
     check("타임라인이 이어 붙는다", len(res4["timeline"]) == 2 and len(store) >= 1,
           str(res4["timeline"]))
 
+    # ─────────────────────────────────────────────────────────── v1.2.12
+    #  수신(To)/참조(CC) 기본 분류 · 내 규칙(발신자→키워드) · 단순 공유 예외
+    print("\n[I] 수신(To)/참조(CC) 기본 분류 · 내 규칙 · 단순 공유 예외")
+    sm.configure({"name": ME_NAME, "title": ME_TITLE, "dept": ME_DEPT,
+                  "email": ME_ADDR, "company": "천일정기화물자동차"},
+                 {"rules": {"senders": [{"key": "etd@chunil.co.kr", "name": "엄태동 상무",
+                                          "email": "etd@chunil.co.kr", "priority": 3}],
+                            "keywords": [{"text": "PTR", "priority": 2}]}})
+
+    def _mk(**kw):
+        it = {"title": "생산 1공장 출하리스트", "bodyText": "하기 참조.",
+              "sender": "엄태동 상무", "senderName": "엄태동 상무",
+              "senderEmail": "etd@chunil.co.kr", "recipientRole": "CC"}
+        it.update(kw)
+        sm.classify(it)
+        return it
+
+    to_it = _mk(recipientRole="To")
+    check("수신(To) → 🔴 즉시 (단순 공유 발신자 규칙 무시)",
+          to_it["priority"] == 1 and "내 규칙" not in to_it["priorityReason"], to_it["priorityReason"])
+    cc_it = _mk()
+    check("참조(CC)만 → ⚪ 단순 공유 규칙 적용",
+          cc_it["priority"] == 3 and "내 규칙" in cc_it["priorityReason"], cc_it["priorityReason"])
+    named_it = _mk(title=f"{ME_NAME} {ME_TITLE}님 확인 — 생산 1공장 출하리스트")
+    check("참조(CC)라도 이름 지목 → 🔴 즉시(규칙 무시)",
+          named_it["priority"] == 1, named_it["priorityReason"])
+    kw_it = _mk(title="PTR 막차 납입 확인", sender="김동료 대리", senderName="김동료 대리",
+                senderEmail="dongryo@chunil.co.kr")
+    check("제목 키워드 규칙(PTR) → 🟡 흐름 참고", kw_it["priority"] == 2, kw_it["priorityReason"])
+    plain_it = _mk(title="공정이관 검토 요청", sender="김동료 대리", senderName="김동료 대리",
+                   senderEmail="dongryo@chunil.co.kr")
+    check("규칙 없는 참조(CC) → 🟡 흐름 참고", plain_it["priority"] == 2, plain_it["priorityReason"])
+
+    gem_calls2 = []
+
+    class _Gem2:
+        def analyze(self, mail, **kw):
+            gem_calls2.append(1)
+            return {"summary": "x", "timeline": [], "actionItems": [], "dueDate": None, "deadline": "",
+                    "replyStatus": "no_reply_needed", "category": "기타", "urgency": "normal",
+                    "threadGist": "", "tags": [], "replyDrafts": {}}
+
+    share_mail = {"mf_no": 991001, "subject": "생산 1공장 출하리스트", "bodyText": "하기 참조.",
+                  "from_raw": "엄태동 상무 <etd@chunil.co.kr>", "from_email": "etd@chunil.co.kr",
+                  "date": "2026-11-24 09:00", "to": ["강한 <kanghan@chunil.co.kr>"],
+                  "cc": [f"{ME_NAME} <{ME_ADDR}>"]}
+    res_share = sm.analyze_mail(_Gem2(), share_mail, "받은편지함", {}, thread_cache={})
+    check("⚪ 단순 공유 규칙 + 참조(CC) → AI 0회",
+          res_share["aiSkipped"] and res_share["aiSkipReason"] == "simple_share" and not gem_calls2,
+          res_share.get("summary", "")[:30])
+    to_share = dict(share_mail, to=[f"{ME_NAME} <{ME_ADDR}>"], cc=[])
+    res_to = sm.analyze_mail(_Gem2(), to_share, "받은편지함", {}, thread_cache={})
+    check("수신(To)이면 단순 공유 규칙이 있어도 정상 분석",
+          not res_to.get("aiSkipped") and len(gem_calls2) == 1, str(res_to.get("aiSkipReason")))
+    sm.set_custom_rules({})       # 뒤 테스트로 규칙이 새지 않게
+
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)

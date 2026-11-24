@@ -103,6 +103,97 @@ CFG: dict = {
     "vips": [],                # [{"name": "", "email": "", "label": "1-1 최우선", "rank": 1, "toOnly": false}]
 }
 P3_TITLE_REASON = P3_LABEL + " · 출하/납입 리스트"
+
+# ── 내 분류 규칙(커스텀) — 화면(⚙️ mb_rules_v1 · 포털 /api/state rules)과 같은 저장소 (v1.2.12)
+#    포털은 state.json 의 rules 를, GitHub Actions 는 board_config.json 의 rules 를 넘겨준다.
+#    적용 순서도 화면과 같다: ① 발신자 규칙 → ② 제목 키워드 규칙 → ③ 기본 분류.
+CUSTOM_RULES: dict = {"senders": [], "keywords": []}
+_CR_EMAIL: dict = {}
+_CR_NAME: dict = {}
+_CR_KW: list = []
+
+
+_RULE_TITLE_RE = re.compile("|".join((
+    "과장보", "부사장", "본부장", "상무", "전무", "이사", "부장", "차장", "과장", "대리",
+    "사원", "주임", "계장", "팀장", "실장", "소장", "대표", "사장", "매니저")))
+
+
+def _rule_name(name: str) -> str:
+    """`김세유 (납입1팀)` · `최수철 부장` → 규칙 키로 쓰는 이름(괄호·직급 제거, 공백 제거, 소문자)."""
+    t = re.sub(r"\s*\([^)]*\)\s*", " ", str(name or "")).strip()
+    m = re.match(r"^(.{1,20}?)\s*(?:" + _RULE_TITLE_RE.pattern + r")$", t)
+    n = m.group(1).strip() if m else ""
+    return re.sub(r"\s+", "", n or t).lower()
+
+
+def set_custom_rules(rules) -> None:
+    """규칙 저장소(dict) → 발신자·키워드 색인. 형식이 어긋난 항목은 조용히 건너뛴다."""
+    global CUSTOM_RULES, _CR_EMAIL, _CR_NAME, _CR_KW
+    out: dict = {"senders": [], "keywords": []}
+    if isinstance(rules, dict):
+        for r in rules.get("senders") or []:
+            if not isinstance(r, dict):
+                continue
+            try:
+                p = int(r.get("priority"))
+            except (TypeError, ValueError):
+                continue
+            if p not in (1, 2, 3):
+                continue
+            email = str(r.get("email") or "").strip().lower()
+            name = str(r.get("name") or "").strip()
+            key = str(r.get("key") or email or name).strip()
+            if not key:
+                continue
+            out["senders"].append({"key": key, "name": name, "email": email,
+                                   "priority": p, "toOnly": bool(r.get("toOnly"))})
+        for k in rules.get("keywords") or []:
+            if not isinstance(k, dict):
+                continue
+            text = str(k.get("text") or "").strip()
+            try:
+                p = int(k.get("priority"))
+            except (TypeError, ValueError):
+                continue
+            if text and p in (1, 2, 3):
+                out["keywords"].append({"text": text, "priority": p})
+    CUSTOM_RULES = out
+    _CR_EMAIL, _CR_NAME, _CR_KW = {}, {}, []
+    for s in out["senders"]:
+        if s["email"]:
+            _CR_EMAIL[s["email"]] = s
+        if s["name"]:
+            _CR_NAME[_rule_name(s["name"])] = s
+    for k in out["keywords"]:
+        _CR_KW.append((k["text"].lower(), k["priority"], k["text"]))
+
+
+def custom_rule_for(item: dict, protected: bool = False):
+    """이 메일에 걸리는 내 규칙 → (priority, 설명) 또는 None.
+
+    화면(index.html ruleForItem)과 같은 순서: 발신자 규칙을 먼저 보고, 없으면 제목 키워드.
+    ⚪ 단순 공유(3) 규칙은 보호 메일(수신 To·이름 지목)에는 걸지 않는다(예외 안전장치).
+    """
+    email = (item.get("senderEmail") or "").strip().lower()
+    sender = item.get("senderName") or item.get("sender") or ""
+    rule = _CR_EMAIL.get(email) if email else None
+    if rule is None and _CR_NAME:
+        rule = _CR_NAME.get(_rule_name(sender))
+    if rule is not None:
+        if rule.get("toOnly") and item.get("recipientRole") != "To":
+            rule = None
+        elif not (protected and rule["priority"] == 3):
+            who = rule.get("name") or rule.get("email") or rule.get("key")
+            return rule["priority"], f"내 규칙(발신자 '{who}')"
+    if _CR_KW:
+        title = (item.get("title") or "").lower()
+        for text, prio, raw in _CR_KW:
+            if text not in title:
+                continue
+            if protected and prio == 3:
+                continue
+            return prio, f"내 규칙(키워드 '{raw}')"
+    return None
 P3_CATEGORIES = {"재고/실사", "현황/보고", "출하/보급"}
 P3_CATEGORY_REASON = P3_LABEL + " · 현장 일상 공유"
 EXTERNAL_CATS = {"PTR", "승인/검토", "결품/보고", "불량/품질", "조직/업무", "일정/공유", "반출/전용"}
@@ -240,6 +331,7 @@ def configure(owner: dict | None = None, cfg: dict | None = None) -> dict:
     kws = CFG.get("p3_title_keywords")
     if kws:
         P3_TITLE_KEYWORDS = tuple(str(k) for k in kws)
+    set_custom_rules(CFG.get("rules"))       # 내 규칙(발신자·키워드) — 화면과 같은 저장소 (v1.2.12)
     return OWNER
 
 
@@ -1929,7 +2021,9 @@ def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict 
     if inbox and not brief and not force_deep:
         priority = int(prefilter(mail, contacts).get("priority") or 2)
         mentioned = text_mentions_us(mail)
-        if priority == 3 and not mentioned:
+        to_me = _is_to(mail)          # 내가 직접 수신(To)인가 — 팀원이 받은 것과 구분한다
+        # ⚪ 단순 공유 — AI 0회. 단, 내가 수신(To)이거나 본문·제목에 지목된 건은 예외로 정상 분석한다(v1.2.12).
+        if priority == 3 and not mentioned and not to_me:
             return skip_analysis(mail, "simple_share")
         if not mentioned and not to_includes_us(mail, contacts):
             return light_analysis(mail, contacts)
@@ -2036,7 +2130,7 @@ def classify(item: dict) -> None:
     name = re.sub(r"\s*\(.*?\)\s*", " ", sender).strip()
     to_me = item.get("recipientRole") == "To"
 
-    item["mentionedUser"] = mentions_me(body)
+    item["mentionedUser"] = mentions_me(body) or mentions_me(title)   # 제목 지목도 포함(v1.2.12)
     item["isVip"] = False
     item["vipLabel"] = ""
     item["vipRank"] = 0
@@ -2053,21 +2147,30 @@ def classify(item: dict) -> None:
     bulk_list = any(k in title for k in P3_TITLE_KEYWORDS)
     category = item.get("category") or ""
 
-    if item["vipRank"] == 1:
+    # 보호 대상 — 내가 수신(To)이거나 제목·본문에 내 이름이 지목됨. ‘단순 공유’ 규칙이 걸려도
+    # 이 메일은 흐름 참고 아래로 내려가지 않는다(화면 isProtectedItem 과 같은 기준).
+    protected = bool(to_me or item["mentionedUser"])
+    labels = {1: P1_LABEL, 2: P2_LABEL, 3: P3_LABEL}
+    custom = custom_rule_for(item, protected)
+    if custom:
+        prio, why = custom
+        item["priority"], item["priorityReason"] = prio, f"{labels[prio]} · {why}"
+        if prio == 1 and item["vipRank"] == 0 and item["mentionedUser"]:
+            item["vipRank"], item["vipLabel"] = 3, "1-3 지목"
+    elif item["vipRank"] == 1:
         item["priority"], item["priorityReason"] = 1, f"{P1_LABEL} · {item['vipLabel']} 발신"
     elif item["vipRank"] == 2:
         item["priority"], item["priorityReason"] = 1, f"{P1_LABEL} · {item['vipLabel']} 발신 + 수신인(To)"
     elif item["mentionedUser"]:
         who = OWNER.get("name") or "내 이름"
-        item["priority"], item["priorityReason"] = 1, f"{P1_LABEL} · 본문에서 '{who}' 직접 지목"
+        item["priority"], item["priorityReason"] = 1, f"{P1_LABEL} · 제목·본문에서 '{who}' 직접 지목"
         if item["vipRank"] == 0:
             item["vipRank"], item["vipLabel"] = 3, "1-3 지목"
-    elif bulk_list:
-        item["priority"], item["priorityReason"] = 3, P3_TITLE_REASON
-    elif (not gm_sender) and (not to_me) and category in P3_CATEGORIES:
-        item["priority"], item["priorityReason"] = 3, P3_CATEGORY_REASON
     elif to_me and CFG.get("to_is_urgent", True):
         item["priority"], item["priorityReason"] = 1, f"{P1_LABEL} · 나를 수신인(To)으로 지정"
+    elif bulk_list:
+        # 수신(To)·지목 건은 위에서 이미 1순위라, 여기 오는 건 참조(CC)로만 받은 리스트다.
+        item["priority"], item["priorityReason"] = 3, P3_TITLE_REASON
     else:
         item["priority"] = 2
         if gm_sender:
@@ -2075,12 +2178,12 @@ def classify(item: dict) -> None:
         elif category in EXTERNAL_CATS:
             item["priorityReason"] = f"{P2_LABEL} · 사내 주요 이슈 흐름"
         else:
-            item["priorityReason"] = f"{P2_LABEL} · 모니터링(내가 지목된 건 아님)"
+            item["priorityReason"] = f"{P2_LABEL} · 참조(CC) 수신 · 내가 지목된 건 아님"
 
     # 해외물류/선적이 주된 내용이고 나를 지목하지 않았으면 즉시 확인으로 올리지 않는다
     blob = (title + " " + body).lower()
     ship_hits = sum(blob.count(k) for k in SHIP_KEYWORDS)
-    if (item["priority"] == 1 and not item["mentionedUser"] and item["vipRank"] != 1
+    if (item["priority"] == 1 and not item["mentionedUser"] and not to_me and item["vipRank"] != 1
             and (gm_sender or ship_hits >= 2) and ship_hits >= 2):
         item["priority"] = 2
         item["priorityReason"] = f"{P2_LABEL} · 해외물류/선적 건 (내가 지목된 건 아님)"

@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.11"
+VERSION = "1.2.12"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -992,7 +992,7 @@ def run_backfill(uid: str, *, limit: int | None = None, nm: Any | None = None) -
         with SYNC_LOCK:
             # sync_mail 의 분류 규칙은 전역 — 다른 사용자가 마지막으로 설정했을 수 있어 다시 맞춘다
             owner = board.get("owner") if isinstance(board.get("owner"), dict) else {}
-            sm.configure(dict(owner), sm.load_board_config(CFG["board_config"]))
+            sm.configure(dict(owner), classify_cfg(uid))
             report = bfa.run_batch(board, nm, limit=limit or CFG["backfill_limit"],
                                    max_pages=CFG["backfill_pages"], s_date=CFG["backfill_s_date"],
                                    contacts=contacts)
@@ -1079,7 +1079,7 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
 
         # ── 로그인 사용자(이름·직급·부서) — 화면과 본문 지목 판정의 기준
         owner = sm.detect_owner(nm, uid, contacts=contacts_list, data=board)
-        sm.configure(owner, sm.load_board_config(CFG["board_config"]))
+        sm.configure(owner, classify_cfg(uid))
         owner_box = {k: sm.OWNER.get(k) for k in ("name", "title", "dept", "company", "email")}
 
         now = sm.kst_now()
@@ -1594,7 +1594,7 @@ def mail_analyze(uid: str, mail_id: str) -> dict:
     stats: dict[str, Any] = {"gemini_calls": 0, "warnings": []}
     with SYNC_LOCK:                 # sync_mail 의 전역 분류 상태(OWNER·ME)를 동기화와 섞지 않는다
         owner = board.get("owner") or user_meta(uid).get("owner") or {}
-        sm.configure(owner, sm.load_board_config(CFG["board_config"]))
+        sm.configure(owner, classify_cfg(uid))
         gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"])
         analysis = sm.analyze_mail(gem, mail, "받은편지함", contacts,
                                    thread_cache=board.setdefault("thread_cache", {}),
@@ -2442,6 +2442,30 @@ class PortalHandler(BaseHTTPRequestHandler):
             self._err(HTTPStatus.NOT_FOUND, "찾을 수 없습니다")
             return
         self._send(HTTPStatus.OK, body, guess_type(full), cache="public, max-age=86400")
+
+
+
+def board_rules(uid: str) -> dict:
+    """이 사용자가 화면(⚙️ 분류 규칙)에서 저장한 규칙 — /api/state sections.rules(JSON 문자열).
+
+    화면의 mb_rules_v1 과 같은 내용이고, 수집·AI 생략 판정에도 같은 순서로 적용한다(v1.2.12).
+    """
+    rec = (load_state(uid).get("sections") or {}).get("rules") or {}
+    raw = rec.get("raw") if isinstance(rec, dict) else None
+    if not raw:
+        return {}
+    try:
+        got = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def classify_cfg(uid: str) -> dict:
+    """sync_mail.configure 에 넘길 분류 설정 — board_config.json + 이 사용자의 규칙."""
+    cfg = dict(sm.load_board_config(CFG["board_config"]))
+    cfg["rules"] = board_rules(uid)      # 규칙이 없으면 빈 규칙으로 되돌린다(다른 사용자 규칙이 남지 않게)
+    return cfg
 
 
 def state_path(uid: str) -> str:
