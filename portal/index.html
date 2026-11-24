@@ -190,7 +190,7 @@
   @keyframes sp{to{transform:rotate(360deg)}}
 
   /* ---------- 요약 ---------- */
-  .kpi{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:20px 0 6px}
+  .kpi{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:20px 0 6px}
   .kpi-card{position:relative; background:var(--card); border:1px solid var(--line);
     border-radius:10px; padding:12px 13px 11px; box-shadow:none}
   .kpi-card .lab{font-size:10.5px; font-weight:600; letter-spacing:.01em; color:var(--ink-3)}
@@ -216,7 +216,7 @@
   button.kpi-card.on .lab .go{color:var(--brand)}
   .kpi-hint{font-size:10.5px; color:var(--ink-3); margin:6px 2px 0; text-align:right}
   .kpi-hint b{color:var(--ink-2); font-weight:600}
-  @media (max-width:1000px){ .kpi{grid-template-columns:repeat(3,1fr)} }
+  @media (max-width:1000px){ .kpi{grid-template-columns:repeat(2,minmax(0,1fr))} }
   /* 🔴 즉시 확인 점멸 — 아직 ✅ 확인하지 않은 🔴 메일이 1건 이상이면
      상단 🔴 KPI 카드와 아래 🔴 탭이 부드럽게 맥동한다. 모두 확인해 0건이 되면
      JS가 .p1-live 클래스를 떼어 그 자리에서 즉시 멈춘다. */
@@ -286,7 +286,7 @@
   /* ---------- 캘린더 ---------- */
   /* ---------- 🌤️ 날씨 (헤더 우측 칩 + 드롭다운) ---------- */
   .hd-sub{display:flex; justify-content:flex-end; position:relative; padding:0 16px 8px; background:transparent}
-  /* 🏷️ 화면 버전 배지 (v1.2.8) — 헤더 아래 줄 왼쪽, PC·모바일 공통 */
+  /* 🏷️ 화면 버전 배지 (v1.2.9) — 헤더 아래 줄 왼쪽, PC·모바일 공통 */
   .ver-badge{display:inline-flex; align-items:center; gap:4px; margin-right:auto; padding:2px 7px; border-radius:999px;
     border:1px solid var(--line); background:#f4f4f5; color:var(--ink-3); font-size:9.8px; font-weight:600;
     letter-spacing:.3px; font-variant-numeric:tabular-nums; align-self:center; white-space:nowrap; cursor:help}
@@ -529,6 +529,12 @@
   .b-due{background:var(--brand-weak); color:var(--brand)}
   .b-due.hot{background:var(--red); color:#fff}
   .b-due.over{background:#c92a2f; color:#fff}
+  /* v1.2.9 — ⏰ D-3 마감 목록의 [D-3]·[오늘]·[D+N 지연]·[회신 필요]·[메일+캘린더] 배지 */
+  .b-d3{background:var(--brand-weak); color:var(--brand)}
+  .b-d3.over{background:#c92a2f; color:#fff}
+  .b-d3.today{background:var(--red-weak); color:var(--red)}
+  .b-d3.rep{background:#fdf6ec; color:#95550c}
+  .b-link{background:#f3edff; color:#6d3fd1}
   .b-reply{background:#fdf6ec; color:#95550c}
   .b-replied{background:var(--green-weak); color:var(--green)}
   .b-noreply{background:var(--gray-weak); color:var(--ink-3)}
@@ -1367,7 +1373,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.8</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.9</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1578,7 +1584,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.8").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.9").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -2491,7 +2497,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<button type="button" class="bf-more" data-bf-go="today">전체 ▸</button></div>' +
         (todayMail.length
           ? todayMail.slice(0, BRIEF_ROW_MAX).map((it) => bfMailRow(it, false)).join("") +
-            (todayMail.length > BRIEF_ROW_MAX ? '<div class="bf-note-row">…외 ' + (todayMail.length - BRIEF_ROW_MAX) + "건은 ‘⏰ 오늘 마감’에서 전부 볼 수 있습니다.</div>" : "")
+            (todayMail.length > BRIEF_ROW_MAX ? '<div class="bf-note-row">…외 ' + (todayMail.length - BRIEF_ROW_MAX) + "건은 ‘⏰ D-3 마감’에서 전부 볼 수 있습니다.</div>" : "")
           : '<div class="bf-none">오늘 기한·임박한 메일이 없습니다.</div>') + "</div>";
 
       /* 4) ✉️ 회신 대기 · ⏳ 보낸 요청 미회신 */
@@ -2520,14 +2526,14 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
 
   function briefSumText() {
     const p1 = p1Items().filter((i) => !isDone(i)).length;
-    const todayN = kpiTodayCount();
+    const todayN = d3Build().total;
     const reply = kpiReplyList().length;
     const fu = fuPending().length;
     const calN = briefCalList().length;
     const bits = [];
     if (calN) bits.push("📅 " + calN + "건");
     if (p1) bits.push("🔴 " + p1 + "건");
-    if (todayN) bits.push("⏰ " + todayN + "건");
+    if (todayN) bits.push("⏰ D-3 " + todayN + "건");
     if (reply) bits.push("✉️ " + reply + "건");
     if (fu) bits.push("⏳ " + fu + "건");
     return "🌙 간밤 새 메일 " + briefOvernightList().length + "건 · " +
@@ -2601,7 +2607,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       toast("내 캘린더를 열었습니다 — 오늘·내일 일정과 관련 메일을 볼 수 있습니다", 2600);
       return;
     }
-    if (go === "today") { onKpi("today"); return; }
+    if (go === "today") { onKpi("d3"); return; }
     if (go === "p1") { onKpi("p1"); return; }
     if (go === "reply") { onKpi("reply"); return; }
     if (go === "fu") { onKpi("fu"); return; }
@@ -2637,28 +2643,105 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   }, true);
 
   /* ---------------- 렌더: 요약 (KPI 카드 = 누를 수 있는 필터) ----------------
-     🔴 = 🔴 전체(캡션에 미완료 건수) / ⏰ = 🔴·🟡·📌 기한 + 📅 오늘 일정 /
-     ✉ = 🔴·🟡 중 답장 대기 미완료 / ⏳ = 보낸 요청 미회신 / ✅ = 완료 */
-  /* ⏰ 오늘 마감 = ①🔴·🟡 미완료 메일 중 오늘 기한·임박
-     ②📌 고정한 메일 중 미완료이면서 오늘 기한·임박 (⚪ 단순 공유·이전 기록에 있던 메일이라도 사용자가 핀으로 고정했으면 포함)
-     ③📅 내 캘린더에 등록한 메일 중 오늘 날짜이고 미완료
-     — 같은 메일은 한 번만 센다(①·②·③ 중복 금지). 수기 일정은 kpiTodayCusList(). */
-  function kpiTodayMailList() {
-    const today = todayY(), seen = new Set(), out = [];
-    const push = (it) => { if (!it || it.id == null) return; const k = String(it.id); if (seen.has(k)) return; seen.add(k); out.push(it); };
-    liveItems().forEach((i) => { if (!isDone(i) && (priorityOf(i) === 1 || priorityOf(i) === 2) && (isTodayDue(i) || dueInfo(i).hot)) push(i); });
-    items().forEach((i) => { if (!isDone(i) && isPinned(i) && (isTodayDue(i) || dueInfo(i).hot)) push(i); });
-    items().forEach((i) => { if (!isDone(i) && calDate(i) === today) push(i); });
-    return out;
+     v1.2.9 — 5장에서 4장으로: 🔴 즉시 확인 / ⏰ D-3 마감 / ⏳ 미회신 대기 / ✅ 완료.
+     '오늘 마감'과 '회신 필요'는 실무에서 결국 같은 처리 대상이라 'D-3 마감' 하나로 합쳤다. */
+
+  /* ---------------- ⏰ 'D-3 마감' 집계 (v1.2.9) ----------------
+     날짜는 주말·공휴일을 빼지 않은 실제 달력일(365일)로 센다.
+       diffDays = 기준일 − 오늘  →  음수면 D+{n} 지연 · 0 오늘 · 1 D-1 · 2 D-2 · 3 D-3
+     한 카드에 담는 것 (✅ 확인(완료)·회신 완료/불필요로 처리한 건은 뺀다):
+       ① 메일 기한 — 🔴·🟡·📌 고정·📅 등록 메일 중 기한이 3일 안이거나 지난 것.
+          ⚪ 단순 공유는 📌·📅 로 직접 찍은 것만 (날짜만 적힌 출하리스트가 카드를 덮지 않게).
+       ② 회신 필요 — replyStatus 가 needs_reply 인 메일. 명시 기한이 없으면 수신일+3일을
+          기한으로 보고 넣되(이미 지난 일반 회신 요청도 포함) 정렬은 맨 뒤 '기한 미지정'으로 둔다.
+       ③ 캘린더 — 📅 등록한 메일과 📌 개인/구두 일정 중 3일 안이거나 지난 것.
+     같은 안건이 메일과 캘린더에 함께 있으면(캘린더에 등록한 메일, mailId 로 연결된 일정)
+     한 건으로만 세고 [🔗 메일+캘린더] 로 표시한다. */
+  const D3_N = 3;
+  const d3Reply = (it) => replyOf(it) === "needs_reply";
+  /* 명시 기한이 없는 일반 회신 요청의 기본 기한 = 수신일 + 3일(달력일) */
+  function d3ReplyDue(it) {
+    const base = parseYmd(String((it && it.receivedAt) || "").slice(0, 10)) || parseYmd(todayY());
+    return ymd(addDays(base, D3_N));
   }
-  const kpiTodayList = kpiTodayMailList;
+  /* 그 건의 기준일 — 명시 기한 → 📅 등록일 → (회신 필요) 수신일+3일 */
+  function d3DateOf(it) { return dueOf(it) || calDate(it) || (d3Reply(it) ? d3ReplyDue(it) : null); }
+  function d3Diff(it) { const d = d3DateOf(it); return d ? diffDays(d, todayY()) : null; }
+  const d3Soon = (dd) => dd !== null && dd !== undefined && dd <= D3_N;
+  /* 메일 한 건 → D-3 항목 (대상이 아니면 null) */
+  function d3MailEntry(it) {
+    if (!it || it.id == null || isDone(it)) return null;
+    const pin = isPinned(it), cal = !!calDate(it), reply = d3Reply(it);
+    if (isArchived(it) && !pin && !cal) return null;        /* 이전 기록은 📌·📅 로 찍은 것만 */
+    if (priorityOf(it) === 3 && !pin && !cal && !reply) return null;
+    const own = !!(dueOf(it) || calDate(it));               /* 메일에 붙은 기한·등록일 */
+    if (!own && !reply) return null;
+    const dd = d3Diff(it);
+    /* 명시 기한이 있으면 그 기한이 3일 안일 때만 (기한이 멀면 그때 카드에 들어온다).
+       기한이 없는 일반 회신 요청만 수신일+3일을 기한으로 삼아 계속 남긴다. */
+    if (own && !d3Soon(dd)) return null;
+    return { type: "mail", id: String(it.id), it: it, day: own ? dd : null, reply: reply, linked: cal };
+  }
+  /* 📌 개인/구두 일정 한 건 → D-3 항목 (일정은 완료 개념이 없어 지난 것도 지연으로 남긴다) */
+  function d3CusEntry(c, byMail) {
+    const dd = diffDays(c.date, todayY());
+    if (!d3Soon(dd)) return null;
+    const linked = c.mailId && byMail.has(String(c.mailId));
+    if (linked) { byMail.get(String(c.mailId)).linked = true; return null; }   /* 같은 안건 — 1건 */
+    return { type: "cus", id: String(c.id), c: c, day: dd, reply: false, linked: !!c.mailId };
+  }
+  /* 정렬 묶음: 0 지연 → 1 오늘 → 2 D-1 → 3 D-2 → 4 D-3 → 6 기한 미지정 회신 필요 */
+  function d3Group(e) {
+    if (e.day === null) return 6;
+    return e.day < 0 ? 0 : 1 + e.day;
+  }
+  function d3Cmp(a, b) {
+    const ga = d3Group(a), gb = d3Group(b);
+    if (ga !== gb) return ga - gb;
+    if (ga === 0 && a.day !== b.day) return a.day - b.day;     /* 지연은 오래된 것부터 */
+    if (a.type !== b.type) return a.type === "cus" ? 1 : -1;   /* 같은 날이면 메일 먼저 */
+    if (a.type === "cus") return String(a.c.date).localeCompare(String(b.c.date)) || String(a.c.createdAt || "").localeCompare(String(b.c.createdAt || ""));
+    return rank(a.it) - rank(b.it) || timeDesc(a.it, b.it);
+  }
+  /* 카드·목록이 함께 쓰는 한 벌의 집계 — total 은 중복을 뺀 순수 건수 */
+  function d3Build() {
+    const mails = [], byMail = new Map(), cus = [];
+    items().forEach((it) => {
+      const e = d3MailEntry(it);
+      if (!e) return;
+      mails.push(e);
+      if (!byMail.has(e.id)) byMail.set(e.id, e);
+    });
+    cusLoad().forEach((c) => { const e = d3CusEntry(c, byMail); if (e) cus.push(e); });
+    const rows = mails.concat(cus).sort(d3Cmp);
+    const c = { late: 0, today: 0, soon: 0, reply: 0, cal: 0 };
+    rows.forEach((e) => {
+      if (e.type === "cus") c.cal++;
+      else if (e.day === null) c.reply++;
+      else if (e.day < 0) c.late++;
+      else if (e.day === 0) c.today++;
+      else c.soon++;
+    });
+    const bits = [];
+    if (c.late) bits.push("지연 " + c.late);
+    if (c.today) bits.push("오늘 " + c.today);
+    if (c.soon) bits.push("D-3 이내 " + c.soon);
+    if (c.reply) bits.push("회신 필요 " + c.reply);
+    if (c.cal) bits.push("캘린더 " + c.cal);
+    return { mails: mails, cus: cus, rows: rows, total: rows.length, counts: c,
+             summary: bits.length ? bits.join(" · ") : "3일 안 마감·회신·일정 없음" };
+  }
+  /* 브리핑의 '⏰ 오늘 마감 · 기한 지남' 줄 — D-3 집계 중 오늘·지난 메일만 */
+  function kpiTodayMailList() {
+    return d3Build().rows.filter((e) => e.type === "mail" && e.day !== null && e.day <= 0).map((e) => e.it);
+  }
   const kpiTodayCusList = () => cusFor(todayY());
-  const kpiTodayCount = () => kpiTodayMailList().length + kpiTodayCusList().length;
-  const kpiReplyList = () => liveItems().filter((i) => (priorityOf(i) === 1 || priorityOf(i) === 2) && !isDone(i) && replyOf(i) === "needs_reply");
+  const kpiTodayCount = () => d3Build().total;
+  const kpiReplyList = () => liveItems().filter((i) => !isDone(i) && d3Reply(i));
   const kpiDoneList = () => liveItems().filter(isDone);
   const KPI_META = {
-    today: { ico: "⏰", title: "오늘 마감", sub: "🔴·🟡·📌 오늘 기한 · 임박 메일 + 📅 오늘 일정", list: kpiTodayList, empty: "오늘 기한·임박한 🔴·🟡·📌 메일과 📅 오늘 일정이 없습니다." },
-    reply: { ico: "✉️", title: "회신 필요", sub: "🔴·🟡 답장 대기 (미완료)", list: kpiReplyList, empty: "회신이 필요한 🔴·🟡 건이 없습니다." },
+    d3: { ico: "⏰", title: "D-3 마감", sub: "지연 포함 3일 안 · 회신 필요 · 캘린더 일정",
+          list: () => d3Build().mails.map((e) => e.it), empty: "3일 안에 챙길 마감·회신·일정이 없습니다." },
     done: { ico: "✅", title: "완료", sub: "✅ 확인 처리한 메일", list: kpiDoneList, empty: "아직 확인 처리한 메일이 없습니다." },
   };
   /* 지금 눌린 카드인지 — 🔴·⏳는 탭 이동, ⏰·✉️·✅는 모아 보기 상태 */
@@ -2676,8 +2759,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   function renderKpi() {
     const p1 = p1Items();
     const p1Open = p1.filter((i) => !isDone(i)).length;
-    const todayDue = kpiTodayCount();
-    const need = kpiReplyList().length;
+    const d3 = d3Build();
     const doneAll = kpiDoneList();
     const done = doneAll.length;
     const fu = fuPending();
@@ -2688,13 +2770,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="val">' + val + '<small>건</small></div><div class="cap">' + cap + "</div></button>";
     $("kpi").innerHTML =
       card("p1", "k1" + (p1Open ? " p1-live" : ""), "🔴 즉시 확인", p1Open, "전체 " + p1.length + " · VIP 발신 · 본문 지목", "🔴 즉시 확인 목록으로 이동") +
-      card("today", "k2", "⏰ 오늘 마감", todayDue, "🔴·🟡·📌 기한 + 📅 오늘 일정", "🔴·🟡·📌 기한·임박 메일과 📅 오늘 일정만 모아 보기 (다시 누르면 해제)") +
-      card("reply", "k3", "✉️ 회신 필요", need, "🔴·🟡 답장 대기", "🔴·🟡 중 답장이 필요한 건만 모아 보기 (다시 누르면 해제)") +
+      card("d3", "k2", "⏰ D-3 마감", d3.total, d3.summary, "지연 포함 3일 안 마감 메일 · 회신 필요 · 캘린더 일정만 모아 보기 (다시 누르면 해제)") +
       card("fu", "k5", "⏳ 미회신 대기", fu.length, (fuMax ? "최장 " + fuMax + "일째 · 보낸 요청" : "보낸 요청 회신 대기"), "⏳ 미회신 추적 탭으로 이동") +
       card("done", "k4", "✅ 완료", done, (done ? "🔴 " + doneAll.filter((i) => priorityOf(i) === 1).length + " · 🟡 " + doneAll.filter((i) => priorityOf(i) === 2).length + " · ⚪ " + doneAll.filter((i) => priorityOf(i) === 3).length : "✅ 확인을 누르면 여기로"), "✅ 확인 처리한 메일만 모아 보기 (다시 누르면 해제)");
   }
 
-  /* 카드 클릭 — 이동(p1·fu) 또는 모아 보기 토글(today·reply·done) */
+  /* 카드 클릭 — 이동(p1·fu) 또는 모아 보기 토글(d3·done) */
   function onKpi(k) {
     view.day = null; view.cusId = null; view.sender = "all";
     view.q = ""; const qEl = $("q"); if (qEl) qEl.value = ""; paintWebmailSearch();
@@ -2703,13 +2784,12 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     const reset = { replyOnly: false, showDone: false };
     if (k === "p1") { view.kpi = ""; view.tab = "p1"; Object.assign(view, reset); msg = "🔴 즉시 확인 목록으로 이동했습니다"; }
     else if (k === "fu") { view.kpi = ""; view.tab = "fu"; Object.assign(view, reset); msg = "⏳ 미회신 추적 탭으로 이동했습니다"; }
-    else if (k === "today") {
-      view.kpi = view.kpi === "today" ? "" : "today"; Object.assign(view, reset);
-      msg = view.kpi ? "⏰ 오늘 마감 " + kpiTodayCount() + "건 (오늘 일정 " + kpiTodayCusList().length + " · 마감 메일 " + kpiTodayMailList().length + ")만 모아 봅니다" : "⏰ 오늘 마감 필터를 해제했습니다";
-    } else if (k === "reply") {
-      view.kpi = view.kpi === "reply" ? "" : "reply"; Object.assign(view, reset);
-      view.replyOnly = !!view.kpi;
-      msg = view.kpi ? "✉️ 회신 필요 " + kpiReplyList().length + "건만 모아 봅니다" : "✉️ 회신 필요 필터를 해제했습니다";
+    else if (k === "d3" || k === "today" || k === "reply") {
+      /* today·reply 는 v1.2.9 이전 카드 이름 — 브리핑 등 남은 호출도 같은 목록으로 보낸다 */
+      const on = view.kpi === "d3" || ((k === "today" || k === "reply") && view.kpi !== "d3");
+      view.kpi = on ? "d3" : ""; Object.assign(view, reset);
+      if (view.kpi && k === "reply") view.replyOnly = true;
+      msg = view.kpi ? "⏰ D-3 마감 " + d3Build().total + "건" + (view.replyOnly ? " 중 회신 필요만" : "") + " 모아 봅니다" : "⏰ D-3 마감 필터를 해제했습니다";
     } else if (k === "done") {
       view.kpi = view.kpi === "done" ? "" : "done"; Object.assign(view, reset);
       view.showDone = !!view.kpi;
@@ -3480,8 +3560,9 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   /* ---------------- 렌더: 목록 ---------------- */
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-  function rowHtml(it) {
+  function rowHtml(it, opts) {
     const p = priorityOf(it), d = dueInfo(it), r = replyOf(it), st = stateOf(it);
+    const d3 = opts && opts.d3;   /* ⏰ D-3 마감 목록 — 기한 배지 대신 [D-3]/[오늘]/[D+N 지연] 배지를 단다 */
     const thr = threadOf(it).length;
     const pin = isPinned(it);
     const cls = "row p" + p + (pin ? " pinned" : "") + (p === 1 && d.hot && !isDone(it) ? (d.past ? " over" : " hot") : "") + (st.status === "done" ? " done" : "");
@@ -3506,10 +3587,11 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         (it.imageCount ? " · 🖼 " + it.imageCount + "장" : "") +
         "</span></span>" +
       '<span class="rside">' + (isArchived(it) ? '<span class="badge b-arch">' + ((it.mailbox === "sent") ? "📤 보낸" : "📥 받은") + " · 이전 기록</span>" : "") +
+        (d3 ? d3Badge(d3) : "") +
         '<button type="button" class="badge tog b-pin' + (pin ? " on" : "") + '" data-pin-tog="' + esc(it.id) + '" aria-pressed="' + (pin ? "true" : "false") + '" title="' +
           esc(pin ? "📌 고정됨 — 누르면 고정을 풀고 원래 탭으로 돌아갑니다" : "📌 고정 — 누르면 원래 탭에서 ‘📌 고정’ 탭으로 옮겨집니다") +
           '" aria-label="메일 고정 토글">📌' + (pin ? '<span class="pin-txt"> 고정됨</span>' : "") + "</button>" +
-        (d.text && p !== 3 ? '<span class="badge b-due ' + d.cls + '">' + esc(d.text) + "</span>" : "") +
+        (!d3 && d.text && p !== 3 ? '<span class="badge b-due ' + d.cls + '">' + esc(d.text) + "</span>" : "") +
         '<button type="button" class="badge tog b-cal' + (calDate(it) ? " on" : "") + '" data-cal-tog="' + esc(it.id) + '" title="' +
           esc(calDate(it) ? "내 캘린더 등록됨 (" + calDate(it) + ") · 다시 누르면 해제" : "내 캘린더에 등록 (기본 " + calDefaultDate(it) + ") · 다시 누르면 해제") +
           '" aria-label="캘린더 등록 토글">📅 ' + (calDate(it) ? esc(String(calDate(it)).slice(5).replace("-", "/")) : "캘린더") + "</button>" +
@@ -3581,54 +3663,68 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     return pinFirst(sortList(list));
   }
 
-  /* KPI 카드로 모아 보는 목록 (⏰ 오늘 마감 · ✉️ 회신 필요 · ✅ 완료) */
+  /* KPI 카드로 모아 보는 목록 (⏰ D-3 마감 · ✅ 완료) */
   function kpiListForView() {
+    if (view.kpi === "d3") return d3Build().mails.map((e) => e.it).filter(matches);
     const m = KPI_META[view.kpi]; if (!m) return [];
     return pinFirst(sortList(m.list().filter(matches)));
   }
-  /* ⏰ 오늘 마감 모아 보기 — 오늘 날짜 수기 일정과 오늘 마감·임박 메일을 한 화면에 */
-  function sortTodayMails(list) {
-    const key = (it) => {
-      const ms = deadlineMs(it);
-      if (ms !== null) return ms;
-      const d = dueOf(it), t = d ? Date.parse(d + "T23:59:59") : NaN;
-      return isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
-    };
-    return list.slice().sort((a, b) => key(a) - key(b) || rank(a) - rank(b));
-  }
-  /* 오늘 일정 카드 — 누르면 그 일정과 관련된 메일을 바로 모아 본다 */
-  function cusRowToday(c) {
-    const rel = relatedMails(c).list.length;
-    return '<div class="row cus" data-kpi-cus="' + esc(c.id) + '" role="button" tabindex="0" title="누르면 이 일정과 관련된 메일을 모아 봅니다">' +
-      '<span class="rank cus">📅</span>' +
-      '<span class="rmain"><span class="rt"><span class="rtitle">' + esc(c.title) + '</span><span class="badge b-cus">📌 개인/구두</span></span>' +
-        '<span class="rmeta">' + esc(c.date) + (c.memo ? " · " + esc(c.memo) : "") + (rel ? " · 🔗 관련 메일 " + rel + "건" : "") + "</span></span>" +
-      '<span class="rside"><button type="button" class="badge tog b-del" data-cus-del="' + esc(c.id) + '" title="일정 삭제" aria-label="일정 삭제">✕</button></span></div>';
-  }
-  function renderTodayKpi() {
-    const q = view.q.trim(), ql = q.toLowerCase();
-    const cusAll = kpiTodayCusList();
-    const cus = ql ? cusAll.filter((c) => (c.title + " " + (c.memo || "")).toLowerCase().indexOf(ql) >= 0) : cusAll;
-    const mails = pinFirst(sortTodayMails(kpiTodayMailList().filter(matches)));
-    const total = cus.length + mails.length;
-    let html = '<div class="kpi-focus"><span>⏰</span><b>오늘 마감</b>' +
-      '<span class="kf-sub">' + todayY() + ' · 🔴·🟡·📌 기한 + 📅 오늘 일정 · ' + total + '건' + (q ? ' · “' + esc(q) + '” 검색' : '') + '</span>' +
-      '<button type="button" class="kf-x" data-kpi-clear="1" title="이 필터를 해제하고 이전 목록으로 돌아갑니다">✕ 필터 해제</button></div>';
-    html += '<div class="banner" style="border-color:#ffd9c8;background:#fff8f3">⏰ <div><b>오늘 일정 ' + cus.length + '건 · 마감 메일 ' + mails.length + '건</b> — 오늘 날짜로 넣어 둔 <b>📅 내 캘린더</b> 일정과, 🔴·🟡·<b>📌</b> 고정·<b>📅</b> 등록 메일 중 오늘 기한·임박한 건을 한꺼번에 모았습니다.' +
-      (cus.length ? ' 위쪽 일정 카드를 누르면 그 일정과 관련된 메일이 바로 열립니다.' : '') + '</div></div>';
-    if (cus.length) {
-      html += '<div class="sec-title">📅 오늘 내 캘린더 일정 <span class="hint">' + cus.length + '건 · 누르면 관련 메일 보기</span></div>' +
-        '<div class="rows">' + cus.map(cusRowToday).join('') + '</div>';
+  /* ---------------- ⏰ 'D-3 마감' 모아 보기 (v1.2.9) ----------------
+     메일과 📌 개인/구두 일정을 한 목록에 섞어 지연 → 오늘 → D-1 → D-2 → D-3 → 기한 미지정 순으로 그린다.
+     일정 줄은 ✏️ 수정 · 📅 옮기기 · ✕ 삭제를 그 자리에서 쓸 수 있고, 줄을 누르면 관련 메일이 모인다. */
+  function d3Badge(e) {
+    let out = "";
+    if (e.type === "mail" && e.linked) out += '<span class="badge b-link" title="메일이 📅 캘린더에도 등록되어 있습니다 — 한 건으로 셉니다">🔗 메일+캘린더</span>';
+    if (e.day !== null && e.day !== undefined) {
+      const cls = e.day < 0 ? " over" : (e.day === 0 ? " today" : "");
+      const txt = e.day < 0 ? "D+" + Math.abs(e.day) + " 지연" : (e.day === 0 ? "오늘" : "D-" + e.day);
+      out += '<span class="badge b-d3' + cls + '" title="주말·공휴일을 빼지 않은 달력일 기준">' + txt + "</span>";
     }
-    html += '<div class="sec-title"' + (cus.length ? ' style="margin-top:12px"' : '') + '>✉️ 오늘 마감 · 임박 메일 (🔴·🟡·📌·📅) <span class="hint">' + mails.length + '건 · 마감순</span></div>';
-    html += mails.length ? rowsBlock(mails)
-      : '<div class="empty">' + (q ? '검색어에 맞는 오늘 마감 메일이 없습니다.' : '오늘 기한·임박한 🔴·🟡·📌·📅 메일이 없습니다.<br>⚪ 단순 공유 메일이라도 <b>📌</b>으로 고정하면 오늘 마감·임박일 때 여기에 들어옵니다.') + '</div>';
+    if (e.reply) out += '<span class="badge b-d3 rep" title="아직 회신하지 않은 메일입니다">회신 필요</span>';
+    return out;
+  }
+  function d3CusRow(e) {
+    const c = e.c, rel = relatedMails(c).list.length;
+    const editing = CUS_EDIT === c.id, moving = CUS_MOVE === c.id;
+    return '<div class="row cus' + (editing || moving ? " open" : "") + '" data-kpi-cus="' + esc(c.id) + '" role="button" tabindex="0" title="누르면 이 일정과 관련된 메일을 모아 봅니다">' +
+      '<span class="rank cus">📅</span>' +
+      '<span class="rmain"><span class="rt"><span class="rtitle">' + esc(c.title) + '</span>' +
+        '<span class="badge b-cus">📌 개인/구두</span>' + d3Badge(e) + '</span>' +
+        '<span class="rmeta">' + esc(c.date) + (c.memo ? " · " + esc(c.memo) : "") + (rel ? " · 🔗 관련 메일 " + rel + "건" : "") + '</span>' +
+        cusActsHtml(c) + (editing ? cusEditFormHtml(c) : "") + (moving ? cusMoveFormHtml(c) : "") +
+      '</span></div>';
+  }
+  function renderD3List() {
+    const q = view.q.trim(), ql = q.toLowerCase();
+    const all = d3Build();
+    let rows = all.rows;
+    if (view.replyOnly) rows = rows.filter((e) => e.type === "mail" && e.reply);
+    if (ql) rows = rows.filter((e) => e.type === "cus"
+      ? (e.c.title + " " + (e.c.memo || "")).toLowerCase().indexOf(ql) >= 0
+      : matches(e.it));
+    const nM = rows.filter((e) => e.type === "mail").length, nC = rows.length - nM;
+    const c = all.counts, cs = [];
+    if (c.late) cs.push("지연 " + c.late);
+    if (c.today) cs.push("오늘 " + c.today);
+    if (c.soon) cs.push("D-3 이내 " + c.soon);
+    if (c.reply) cs.push("회신 필요 " + c.reply);
+    if (c.cal) cs.push("캘린더 " + c.cal);
+    let html = '<div class="kpi-focus"><span>⏰</span><b>D-3 마감</b>' +
+      '<span class="kf-sub">' + todayY() + ' 기준 · 메일 ' + nM + ' · 일정 ' + nC + ' · ' + rows.length + '건' +
+        (cs.length ? ' (' + cs.join(" · ") + ')' : '') + (q ? ' · “' + esc(q) + '” 검색' : '') + (view.replyOnly ? ' · 회신 필요만' : '') + '</span>' +
+      '<button type="button" class="kf-x" data-kpi-clear="1" title="이 필터를 해제하고 이전 목록으로 돌아갑니다">✕ 필터 해제</button></div>';
+    html += '<div class="banner" style="border-color:#ffd9c8;background:#fff8f3">⏰ <div><b>지연 · 오늘 · 3일 안 마감을 한곳에</b> — 주말·공휴일을 빼지 않은 달력일 기준입니다. ' +
+      '<b>🔴·🟡·📌·📅</b> 메일의 기한, 회신이 필요한 메일(기한이 없으면 수신일+3일), 📅 등록 메일과 📌 개인/구두 일정을 함께 담았고, 같은 안건은 한 건으로만 셉니다.</div></div>';
+    html += '<div class="sec-title">⏰ 마감 순 <span class="hint">지연 → 오늘 → D-1 → D-2 → D-3 → 기한 미지정 회신 필요</span></div>';
+    html += rows.length
+      ? '<div class="rows">' + rows.map((e) => e.type === "mail" ? rowHtml(e.it, { d3: e }) : d3CusRow(e)).join("") + '</div>'
+      : '<div class="empty">' + (view.replyOnly ? '이 목록에 회신이 필요한 건이 없습니다.' : '3일 안에 챙길 마감·회신·일정이 없습니다.<br>⚪ 단순 공유 메일도 <b>📌</b>으로 고정하면 기한이 3일 안일 때 여기에 들어옵니다.') + '</div>';
     $("listWrap").innerHTML = html;
     $("dayChip").classList.remove("on");
   }
   function renderKpiList() {
+    if (view.kpi === "d3") { renderD3List(); return true; }
     const m = KPI_META[view.kpi]; if (!m) return false;
-    if (view.kpi === "today") { renderTodayKpi(); return true; }
     const list = kpiListForView();
     let html = '<div class="kpi-focus"><span>' + m.ico + '</span><b>' + m.title + '</b>' +
       '<span class="kf-sub">' + m.sub + ' · ' + list.length + '건' + (view.q.trim() ? ' · “' + esc(view.q.trim()) + '” 검색' : '') + '</span>' +
@@ -5423,8 +5519,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
   $("sort").addEventListener("change", (e) => { view.sort = e.target.value; renderSeg(); renderList(); });
   $("replyChk").addEventListener("change", (e) => {
     view.replyOnly = e.target.checked;
-    /* 카드로 모아 본 ‘회신 필요’ 상태와 맞춘다 — 체크를 끄면 모아 보기도 해제 */
-    if (view.kpi === "reply") { view.kpi = ""; renderKpi(); renderSeg(); }
+    /* v1.2.9 — '회신 필요만 보기'는 지금 보는 목록(D-3 마감 포함)의 필터로만 쓴다 */
     $("replyTog").classList.toggle("on", view.replyOnly);
     renderList();
   });
