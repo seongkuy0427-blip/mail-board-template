@@ -1022,6 +1022,15 @@ def run(pin: str, keep: bool) -> int:
           and fw_polished["replyStatus"] == "no_reply_needed" and not fw_polished["actionItems"],
           f"{fw_polished['ourDeptAction']} / {fw_polished['replyStatus']}")
 
+    # ─────────────────────────────────────────────────────────── v1.2.19
+    #  유사 사례 카드마다 ‘웹메일 원본 ↗’ — 카드가 가리키는 과거 메일의 원문 주소가 항상 남아야 한다
+    no_link = [it.get("id") for it in data.get("items", [])
+               if not str(it.get("mailLink") or "").startswith(sm.BASE + "/mail_read.php?")]
+    check("카드 원본 링크 — 저장된 모든 메일(이전 기록 포함)에 원문 주소가 있다(v1.2.19)",
+          no_link == [], str(no_link[:3]))
+    if a:
+        check("카드 원본 링크 — 편지함(mb_id)·메일번호(mf_no)가 주소에 그대로 들어간다(v1.2.19)",
+              a.get("mailLink") == sm.MAIL_LINK % ("inbox", base + 1), str(a.get("mailLink")))
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)
