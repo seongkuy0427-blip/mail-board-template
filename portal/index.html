@@ -6399,7 +6399,15 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       return;
     }
     const cai = e.target.closest("[data-case-ai]");
-    if (cai) { e.preventDefault(); caseAiAnalyze(cai.dataset.caseAi); return; }
+    if (cai) {
+      e.preventDefault();
+      /* 접힌 섹션에서 눌러도 진행 상황이 보이게 먼저 펼친다 */
+      const cs = cai.closest(".dr-sec.fold");
+      if (cs && !cs.classList.contains("open")) {
+        const h = cs.querySelector("[data-fold]"); if (h) foldToggle(h);
+      }
+      caseAiAnalyze(cai.dataset.caseAi); return;
+    }
     const mai = e.target.closest("[data-ai-analyze]");
     if (mai) { e.preventDefault(); await aiAnalyzeMail(mai.dataset.aiAnalyze); return; }
     const caiClear = e.target.closest("[data-case-ai-clear]");
