@@ -1121,6 +1121,8 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             try:      # 새 메일이 없어도 예전 요약·답장 초안은 한 번 정리한다 (v1.2.7 · v1.2.8)
                 fixed = sm.refresh_copied_summaries(board["items"], contacts)
                 fixed += sm.refresh_reply_drafts(board["items"])
+                # v1.2.17 — 사진 첨부 썸네일: 새 메일이 없는 실행에서도 빈 칩·주소 없는 사진 첨부를 몇 건씩 고친다
+                fixed += sm.refresh_attachment_meta(nm, board["items"], limit=4)
                 if fixed:
                     atomic_write_json(board_path, board, mode=0o600)
             except Exception as e:  # noqa: BLE001 - 정리가 실패해도 동기화 상태는 그대로 알린다
@@ -1186,6 +1188,15 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         drafts_fixed = sm.refresh_reply_drafts(board["items"])              # 옛 답장 초안 → 실무형 3안 (v1.2.8)
         if drafts_fixed:
             print(f"[sync] {uid} 답장 초안 {drafts_fixed}건을 실무형 3안으로 정리", flush=True)
+        # v1.2.17 — 📎 사진 첨부 썸네일: 이름이 빈 칩·주소 없는 사진 첨부를 실행마다 몇 건씩 다시 읽어 고친다
+        #  (새로 오는 메일은 parse_read 가 url 까지 담지만, 이미 쌓인 메일은 다시 읽지 않으면 옛 기록이 남는다)
+        try:
+            atts_fixed = sm.refresh_attachment_meta(nm, board["items"], limit=4)
+        except Exception as e:  # noqa: BLE001 - 첨부 보정 실패가 동기화를 막지 않는다
+            atts_fixed = 0
+            print(f"[sync] {uid} 첨부 목록 보정 경고: {type(e).__name__}: {str(e)[:160]}", flush=True)
+        if atts_fixed:
+            print(f"[sync] {uid} 사진 첨부 목록 {atts_fixed}건 다시 읽음", flush=True)
         # ── 메타
         #  첫 실행은 지금 모은 메일에서 직급을 한 번 더 추론한다(위에는 쌓인 기록이 없었으므로)
         if sm.ensure_owner_title(board, sent_texts=title_sent, inbox_texts=title_inbox):
