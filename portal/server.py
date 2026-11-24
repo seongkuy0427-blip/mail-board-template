@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.21"
+VERSION = "1.2.22"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1559,7 +1559,7 @@ def similar_analyze(uid: str, mail_id: str) -> dict:
 # ────────────────────────────────────────────────────────────── ✨ 메일 1통 온디맨드 3단 분석
 #  ⚪ 기록 보관·타 부서 참조로 AI 분석을 건너뛴 메일을, 사용자가 [✨ AI 요약 실행] 을 눌렀을 때만
 #  전체 스레드 + 조직 컨텍스트로 정밀 분석한다. 결과는 board.json 에 저장되어 다시 누르면 0 호출.
-ANALYSIS_FIELDS = ("summary", "headline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
+ANALYSIS_FIELDS = ("summary", "headline", "background", "mainDept", "deptBasis", "ourDeptAction", "myAction",
                    "threadGist", "actionItems", "replyDrafts", "replyStatus", "dueDate", "deadline",
                    "category", "urgency", "tags")
 
@@ -1571,8 +1571,13 @@ def analysis_fields(item: dict) -> dict:
     return out
 
 
-def mail_analyze(uid: str, mail_id: str) -> dict:
-    """메일 1통 정밀 분석 — 이미 정밀 분석된 메일이면 저장된 결과를 그대로 돌려준다."""
+def mail_analyze(uid: str, mail_id: str, *, force: bool = False) -> dict:
+    """메일 1통 정밀 분석.
+
+    force=False — 이미 정밀 분석된 메일이면 저장된 결과를 그대로 돌려준다(0 호출).
+    force=True  — [✨ AI 다시 분석] (v1.2.22). 옛 방식으로 요약된 메일도 스레드 캐시를 무시하고
+                  본문 전체를 다시 읽어 배경·실질 주담당·핵심 관건을 새로 채운다(Gemini 1회).
+    """
     mail_id = str(mail_id or "").strip()
     if not mail_id:
         return {"ok": False, "code": "bad_request", "message": "메일 id 가 필요합니다."}
@@ -1585,7 +1590,7 @@ def mail_analyze(uid: str, mail_id: str) -> dict:
                  if isinstance(it, dict) and str(it.get("id")) == mail_id), None)
     if item is None:
         return {"ok": False, "code": "not_found", "message": "이 메일을 보드에서 찾지 못했습니다."}
-    if not item.get("aiSkipped") and sm.is_detailed_summary(item.get("summary")):
+    if not force and not item.get("aiSkipped") and sm.is_detailed_summary(item.get("summary")):
         return {"ok": True, "cached": True, "id": mail_id, "analysis": analysis_fields(item)}
     if not CFG["gemini_key"]:
         return {"ok": False, "code": "no_key",
@@ -1629,7 +1634,8 @@ def mail_analyze(uid: str, mail_id: str) -> dict:
         gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"])
         analysis = sm.analyze_mail(gem, mail, "받은편지함", contacts,
                                    thread_cache=board.setdefault("thread_cache", {}),
-                                   stats=stats, force_deep=True, fetcher=fetcher)
+                                   stats=stats, force_deep=True, fetcher=fetcher,
+                                   fresh=bool(force))    # v1.2.22 — 다시 분석은 누적 캐시 대신 본문 전체
     if analysis.get("aiSkipped"):     # force_deep 인데도 건너뛴 경우는 오류로 알린다
         raise RuntimeError("AI 분석을 실행하지 못했습니다 (생략 판정)")
     for key in ANALYSIS_FIELDS:
@@ -2537,7 +2543,11 @@ class PortalHandler(BaseHTTPRequestHandler):
               f"{' (캐시)' if result.get('cached') else ''}", flush=True)
 
     def _api_mail_analyze(self) -> None:
-        """✨ AI 요약 실행 — 기록 보관로 건너뛴 메일 1통만 정밀 분석한다(결과는 보드에 저장)."""
+        """✨ AI 요약 실행 / ✨ AI 다시 분석 — 메일 1통을 정밀 분석한다(결과는 보드에 저장).
+
+        body: {"id": "m-…", "force": true|false}
+          force=true 면 이미 분석된 메일도 새 기준으로 다시 분석한다(v1.2.22).
+        """
         uid = self._require_user()
         if not uid:
             return
@@ -2547,7 +2557,7 @@ class PortalHandler(BaseHTTPRequestHandler):
             self._err(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "요청이 너무 큽니다")
             return
         try:
-            result = mail_analyze(uid, str(body.get("id") or ""))
+            result = mail_analyze(uid, str(body.get("id") or ""), force=bool(body.get("force")))
         except Exception as e:  # noqa: BLE001 - Gemini·네트워크 실패는 다시 시도할 수 있게 알려 준다
             print(f"[analyze] {uid} 실패: {type(e).__name__}: {str(e)[:300]}", file=sys.stderr)
             self._json(HTTPStatus.BAD_GATEWAY,

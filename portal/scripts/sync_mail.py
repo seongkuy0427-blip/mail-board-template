@@ -1764,7 +1764,7 @@ def clean_body(text: str) -> str:
 #   ⑤ 🔴 즉시 확인·🟡 흐름 참고는 처음부터 3단 정밀 분석한다(v1.2.21 — 경량 요약 분기 제거).
 #      ⚪ 기록 보관만 AI 를 부르지 않고, 필요할 때 화면의 [✨ AI 요약 실행] 으로 정밀 분석한다(포털).
 OUR_DIVISION = ""                   # (개인판은 '납입관리부') CFG["our_dept"] 가 있으면 그것이 우선
-ANALYSIS_BODY_CHARS = 7000          # AI 에 보내는 본문 상한(전체 스레드 포함)
+ANALYSIS_BODY_CHARS = 10000         # AI 에 보내는 본문 상한(전체 스레드 포함) — v1.2.22 배경·인용 스레드 여유
 THREAD_COMPRESS_AT = 10             # 이 통수 이상이면 중간 회신을 1줄로 압축
 THREAD_KEEP_ORIGIN = 2              # 압축할 때 원문을 그대로 두는 최초 메일 수
 THREAD_KEEP_RECENT = 4              # 압축할 때 원문을 그대로 두는 최근 메일 수
@@ -2085,6 +2085,52 @@ ACTION_BANNED = (
 )
 #  "할 일이 없다"는 식의 짧은 마무리도 금지 — 이유와 다음 행동을 적는다.
 ACTION_BANNED_RE = re.compile(r"할\s*일\s*없|볼\s*일\s*없")
+#  v1.2.22 — AI 가 이 스레드의 실제 관건을 써 냈는데 고정 상투어로 덮어쓰면 맥락이 사라진다.
+#  '상투어(무엇을 볼지 없는 문구)' 와 '이 메일에만 해당하는 구체 문장' 을 갈라, 후자는 살린다.
+GENERIC_ACTION_RE = re.compile(
+    r"직접\s*조치\s*없음[^\n]*(?:참조\s*흐름\s*파악\s*필요|담당)"
+    r"|타\s*부서\s*주담당\s*건\s*·\s*참조\s*모니터링"
+    r"|^\s*\[?\s*(?:확인\s*필요|검토\s*필요)\s*\]?\s*$")
+DIRECT_TAG_RE = re.compile(r"^\[?\s*직접\s*(?:회신|조치)\s*필요\s*\]?\s*")
+ACTION_MARK_RE = re.compile(r"관건|모니터링|영향|GM|업체|협력사|현장|라인|품번|재고|납입|출하|"
+                            r"\d{1,2}\s*[/월]\s*\d{1,2}|\d{6,}", re.I)
+
+
+def _generic_action(text: str) -> bool:
+    """무엇을 볼지 없는 상투어·금지어인가."""
+    s = str(text or "").strip()
+    if not s or any(b in s for b in ACTION_BANNED) or ACTION_BANNED_RE.search(s):
+        return True
+    return bool(GENERIC_ACTION_RE.search(s))
+
+
+def _concrete_action(text: str) -> bool:
+    """이 메일에만 해당하는 관건·품번·기한·주체가 들어간 문장인가 (v1.2.22)."""
+    s = str(text or "").strip()
+    if _generic_action(s) or len(re.sub(r"\s", "", s)) < 12:
+        return False
+    return bool(ACTION_MARK_RE.search(s))
+
+
+#  v1.2.22 — AI 는 주담당을 `GM 염주희 차장(용기 사양 승인) · 우리 부서(납입1팀)는 참조` 처럼 쓰라고 지시받는다.
+#  그 꼬리(`· 우리 부서(...)는 참조`)에 우리 팀 이름이 있다고 주담당을 우리 팀으로 되돌리면 안 된다.
+MAIN_TAIL_RE = re.compile(r"·\s*우리\s*부서|\(\s*주담당\s*\)|주담당\s*[:：]")
+
+
+def main_is_ours(main: str, mine: list[str]) -> bool:
+    """mainDept 의 '머리(실제 주체)' 가 우리 부서인가 — 뒤에 붙은 참조 표기는 보지 않는다."""
+    head = MAIN_TAIL_RE.split(str(main or "").strip())[0]
+    return any(tok and tok in head for tok in mine)
+
+
+def _as_reference(text: str) -> str:
+    """타 주체 주담당 건에서 '[직접 회신 필요] …' 를 '[참조 모니터링] …' 로 바꾼다."""
+    s = str(text or "").strip()
+    m = DIRECT_TAG_RE.match(s)
+    if not m:
+        return s
+    rest = s[m.end():].strip()
+    return ("[참조 모니터링] " + rest) if rest else ""
 
 # 타 부서 업무 신호 — 본문이 이쪽 중심이면 주담당을 우리 팀으로 올리지 않는다
 OTHER_DEPT_RULES: tuple[tuple[str, str], ...] = (
@@ -2421,12 +2467,15 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
             my = fb_my
     else:
         # v1.2.18 — 우리 부서 일이 아니면 AI 가 ‘[직접 회신 필요]’로 써도 결론·할 일을 우리 팀 기준으로 바로잡는다
-        our, my = fb_our, fb_my
+        # v1.2.22 — 단, AI 가 이 스레드의 실제 관건(예: 용기 개선 변경 여부 vs 지속 커팅 필요 여부)을
+        #   구체적으로 써 냈으면 상투어로 덮어쓰지 않는다. 회신 요구 표현만 참조로 바꾼다.
+        our = (_as_reference(our) or fb_our) if _concrete_action(our) else fb_our
+        my = (_as_reference(my) or fb_my) if _concrete_action(my) else fb_my
         if result.get("actionItems"):
             result["actionItems"] = []
     main = str(result.get("mainDept") or "").strip()
     mine = our_dept_tokens(contacts) or [our_dept_label()]
-    if not ruling["ours"] and (not main or any(tok and tok in main for tok in mine)):
+    if not ruling["ours"] and (not main or main_is_ours(main, mine)):
         main = ruling["main"]
         result["deptBasis"] = ruling["basis"]
     result["ourDeptAction"] = our
@@ -2468,6 +2517,7 @@ def thread_cache_put(store, mail: dict, analysis: dict, *, used_cache: bool = Fa
             timeline.append(line)
     rec.update({"timeline": timeline[-CACHE_TIMELINE_MAX:],
                 "count": len(timeline),
+                "background": analysis.get("background") or rec.get("background") or "",
                 "mainDept": analysis.get("mainDept") or rec.get("mainDept") or "",
                 "deptBasis": analysis.get("deptBasis") or rec.get("deptBasis") or "",
                 "ourDeptAction": analysis.get("ourDeptAction") or rec.get("ourDeptAction") or "",
@@ -2486,11 +2536,18 @@ def thread_cache_put(store, mail: dict, analysis: dict, *, used_cache: bool = Fa
 
 # ── 3단 조립 · 건너뛰기 ──────────────────────────────────────────
 def compose_analysis(timeline, main_dept: str = "", dept_basis: str = "",
-                     our_action: str = "", my_action: str = "") -> str:
-    """AI 가 준 재료를 화면용 3단 텍스트로 고정 조립한다(형식이 흔들리지 않게)."""
+                     our_action: str = "", my_action: str = "", background: str = "") -> str:
+    """AI 가 준 재료를 화면용 3단 텍스트로 고정 조립한다(형식이 흔들리지 않게).
+
+    v1.2.22 — 1단을 '배경 → 흐름'으로 바꿨다. 원본을 열지 않아도 무슨 일이 왜 생겼고
+    각 주체가 무엇을 걸고 있는지 먼저 읽히도록 background 를 맨 앞 줄에 둔다.
+    """
     label = our_dept_label()
     who = f"{OWNER.get('name') or ''} {OWNER.get('title') or ''}".strip() or "나"
-    lines = ["1) 🔄 업무 진행 경과 (최초 → 최신)"]
+    lines = ["1) 🔄 업무 진행 경과 (배경 → 흐름)"]
+    bg = re.sub(r"\s*\n+\s*", " ", str(background or "")).strip()
+    if bg:
+        lines.append("- 배경: " + bg)
     tl = [str(t).strip() for t in (timeline or []) if str(t).strip()]
     lines += ["- " + t for t in tl] or ["- (본문 1통 — 이전 회신 없음)"]
     lines += ["", "2) 🎯 요청 대상 및 주담당 부서 판별",
@@ -3074,8 +3131,11 @@ def analysis_input_text(mail: dict, kind: str = "받은편지함", *, contacts: 
         if cache.get("mainDept") or cache.get("ourDeptAction"):
             lines.append(f"[지난 결론] 주담당 {cache.get('mainDept') or '-'} / "
                          f"우리 부서 {cache.get('ourDeptAction') or '-'} / 나 {cache.get('myAction') or '-'}")
+        if cache.get("background"):
+            lines.append(f"[지난 배경] {cache['background']}")
         lines += ["[이번 요청] 아래 '새로 추가된 메일 1통'만 읽어 위 타임라인 끝에 이어 붙이고, "
                   "3단 결론(주담당·우리 부서 할 일·내 할 일)을 최신 기준으로 갱신한다.",
+                  "배경(background)은 지난 배경을 이어 쓰되, 새 메일로 원인·쟁점이 바뀌었으면 고쳐 쓴다.",
                   "", "[새로 추가된 메일 1통]", body]
     else:
         lines += ["", "[본문 — 최초 → 최신 순 (이전 회신·전달 포함)]", body]
@@ -3098,11 +3158,16 @@ def normalize_analysis(result: dict, mail: dict, cache: dict | None = None,
     fields = (out.get("mainDept") or "", out.get("deptBasis") or "",
               out.get("ourDeptAction") or "", out.get("myAction") or "")
     summary = str(out.get("summary") or "").strip()
+    # v1.2.22 — 배경은 AI 응답 → 스레드 캐시 순으로 살린다(증분 분석에서도 맥락이 남게)
+    background = (str(out.get("background") or "").strip()
+                  or str((cache or {}).get("background") or "").strip())
     if timeline or any(fields):
-        composed = compose_analysis(timeline, *fields)
-        if not is_detailed_summary(summary):
+        composed = compose_analysis(timeline, *fields, background=background)
+        if not is_detailed_summary(summary) or (background and background[:24] not in summary):
             summary = composed
     out["summary"] = summary
+    if background:
+        out["background"] = background
     if timeline:
         out["timeline"] = timeline[-CACHE_TIMELINE_MAX:]
     if not out.get("headline"):
@@ -3132,7 +3197,8 @@ def _run_ai(gem, mail: dict, kind: str, contacts: dict | None, cache: dict | Non
 
 def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict | None = None,
                  *, thread_cache: dict | None = None, stats: dict | None = None,
-                 brief: bool = False, force_deep: bool = False, fetcher=None) -> dict:
+                 brief: bool = False, force_deep: bool = False, fetcher=None,
+                 fresh: bool = False) -> dict:
     """메일 1통 분석 — ⚪ 기록 보관만 AI 생략, 🔴 즉시 확인·🟡 흐름 참고는 3단 정밀 분석 (v1.2.21).
 
     정밀 분석은 스레드 캐시가 있으면 '누적 타임라인 + 새 메일 1통'만 보낸다(증분).
@@ -3155,7 +3221,8 @@ def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict 
         att = attachment_summary_text(fetcher, mail, stats=stats)
         if att:
             mail["attachmentText"] = att
-    cache = thread_cache_get(thread_cache, mail)
+    # v1.2.22 — fresh: 스레드 캐시를 무시하고 본문 전체를 다시 읽는다([✨ AI 다시 분석] 버튼)
+    cache = None if fresh else thread_cache_get(thread_cache, mail)
     res = _run_ai(gem, mail, kind, contacts, cache, stats, brief)
     if inbox and not brief:
         thread_cache_put(thread_cache, mail, res, used_cache=bool(cache))
@@ -3352,6 +3419,8 @@ ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
         # 3단 분석 재료 (v1.2.11) — 화면은 이 값들로 1) 진행 경과 / 2) 주담당 / 3) 결론을 조립한다
+        # v1.2.22 — background: 1)의 '배경'(왜 이슈가 생겼고 각 주체가 무엇을 걸고 있는지)
+        "background": {"type": "string"},
         "timeline": {"type": "array", "items": {"type": "string"}},
         "mainDept": {"type": "string"},
         "deptBasis": {"type": "string"},
@@ -3376,7 +3445,7 @@ ANALYSIS_SCHEMA = {
             },
         },
     },
-    "required": ["timeline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
+    "required": ["background", "timeline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
                  "summary", "actionItems", "replyStatus", "category", "urgency", "threadGist"],
 }
 
@@ -3388,38 +3457,57 @@ SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성�
 - 해외물류부 영역(항공/해상 B/L, 선적 부킹, 포워더, 통관, 선복)은 담당이 아니므로 actionItems 에서 제외한다.
 
 [이 분석의 목적 — 3단 고정]
+이 화면은 **웹메일 원본을 열지 않고 이 3단만 읽고 업무를 이해하는 대시보드**다. 지금 이 3단만으로는
+"무슨 일이 왜 생겼고 누구 입장이 어떻게 다른지"가 보이지 않아 원본을 다시 열게 만드는 것이 문제다.
+그래서 단순한 진행사항 나열이 아니라 **맥락(배경·원인·쟁점)과 실질 주체**를 남긴다.
 GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내는 메일에서
-① 업무가 어떻게 흘러왔는지 ② 실제로 요청받은 주담당 부서가 어디인지
-③ 납입관리부(우리 팀)와 김성규 과장이 무엇을 해야 하는지를 분명히 가려낸다.
-수신/참조 위치, 본문 지목, 이전 회신자의 서명·각인, 업무 성격을 함께 보고 판단한다.
+① 왜 이 이슈가 생겼고 지금 어디까지 왔는지 ② 실제로 결정·개선·조치할 주체가 누구인지
+③ 납입관리부(우리 팀)와 김성규 과장이 무엇을 해야 하는지(또는 무엇을 지켜봐야 하는지)를 분명히 가려낸다.
+수신/참조 위치, 본문 지목, 인용된 이전 회신의 서명·각인, 업무 성격을 함께 보고 판단한다.
 화면에는 이 분석이 아래 3단으로 표시된다 — 너는 각 단에 들어갈 재료를 정확히 채운다.
-  1) 🔄 업무 진행 경과   → timeline
+  1) 🔄 업무 진행 경과 (배경 → 흐름)   → background · timeline
   2) 🎯 요청 대상 및 주담당 부서 판별 → mainDept · deptBasis
-  3) ✅ 결론: 우리 부서 할 일 / 내 할 일 → ourDeptAction · myAction
+  3) ✅ 결론: 내가 할 일 / 우리 부서 할 일 → ourDeptAction · myAction
 
-[timeline — 1) 업무 진행 경과]
-- 최초 발신부터 최신 메일까지 시간순으로 한 줄에 하나씩 `[날짜/시간] 발신자 → 수신자 : 핵심 내용` 형태로 쓴다.
-  예) "[11/20 09:12] GM 염주희 차장 → 납입·해외물류부 : MY26 EOP 자재 입항지연으로 11/24 07:00 기준 재고파악 요청"
+[background — 1)의 '배경' · 이번 분석에서 가장 중요한 재료]
+- 이 스레드를 처음 보는 사람이 "무슨 일이 왜 생겼고, 누가 무엇을 걸고 있는지"를 원본 없이 이해하도록 2~4문장으로 쓴다.
+  ① **왜 이슈가 생겼는지** — 사양·조건과 현장의 차이, 사고·클레임·지연의 원인.
+     예) "승인된 용기는 HSC 타입인데 현장에는 RSC 로 입고되어 상단을 잘라 보급해 왔고, 그 절단 작업이 작업자 열상 위험을 만들고 있다."
+  ② **각 주체의 입장과 어려움** — 고객사(GM)·협력사·우리 현장(조립·생산 라인)이 각각 무엇을 요구하고 무엇을 어려워하는지.
+     예) "GM 은 승인 용기로 공급되도록 개선 여부를 검토 중이고, 협력사는 승인서대로 공급해야 한다는 입장이며, 현장은 절단 없이 보급되기를 원한다."
+  ③ **현재 상태** — 지금 어디까지 진행됐고 무엇이 아직 정해지지 않았는지.
+- 영어 원문·인용 스레드에 원인과 쟁점이 적혀 있으면 그 표현을 살려 쓴다(HSC/RSC, 열상 위험, 승인서 등). 제목만 보고 짐작하지 않는다.
+- 근거가 없는 추측은 "(확인 필요)" 로 표시한다. 원래 단순 공유·일정 안내인 메일은 1~2문장으로 줄인다.
+
+[timeline — 1)의 '흐름']
+- 최초 발신부터 최신 메일까지 시간순으로 한 줄에 하나씩 `[날짜/시간] 발신자 → 수신자 : 그 메일이 남긴 핵심` 형태로 쓴다.
+  예) "[11/18 16:12] GM 염주희 차장 → 납입1팀·협력사 : 승인 용기(HSC)와 달리 RSC 로 입고돼 현장에서 상단 절단 중, 열상 위험 — 승인 용기로 긴급 납품 요청"
+- **"진행사항 공유" · "논의" · "확인 요청" · "전달" 처럼 내용 없는 한 줄은 쓰지 않는다.** 그 줄에서 무엇이 결정·요청·우려됐는지 반드시 적는다.
 - 일정·품번·수량·조건이 바뀌었으면 그 줄에 바뀐 사실을 적는다(예: "기한 11/24 → 11/25 변경").
 - `[기존 누적 타임라인]` 이 함께 오면 **그 줄들은 지우거나 고치지 말고 그대로 두고**, 새로 온 메일 1통만
   끝에 이어 붙여 전체 타임라인을 다시 낸다. 20줄을 넘으면 중간을 "… (중간 N건 생략)" 한 줄로 줄여 18줄 이내로.
 - **본문 첫 줄이나 인사말을 그대로 옮기지 않는다.** "○○님," · "요청드립니다" · "안녕하십니까" 같은 문장이
   타임라인에 그대로 남아 있으면 잘못 쓴 것이다.
 - 누가(소속·이름·직급) → 누구에게 → 무슨 사유/품번으로 → 언제까지 무엇을, 의 **제3자 보고체**로 쓴다.
-  예) "사내 해외물류부 류광종 과장이 납입1팀에 11/24 07:00 기준 2품번(13524683·13540045) 재고실사 자료 회신을 요청"
 - 소속 표기: 보낸 사람 주소가 @gm.com 이면 "GM", 사내면 서명·조직도에 나온 부서명("해외물류부" 등)을 쓴다.
 
-[mainDept / deptBasis — 2) 주담당 부서 판별]
-- mainDept: 실제 요청을 받은 부서(또는 사람). 예) "해외물류부(선적·통관)", "조달물류팀", "납입관리부(납입1팀)", "협력사 OO".
-- deptBasis: 그 판단 근거 1줄 — 수신(To) vs 참조(CC) 위치, 본문에서 지목한 이름/부서, 회신 요청 상대, 이전 회신자 서명·각인, 업무 키워드.
+[mainDept / deptBasis — 2) 요청 대상 및 주담당 부서 판별]
+- **전달자·협조자가 아니라 이 건을 실제로 결정·개선·조치할 주체**를 찾는다. 수신(To)에 적힌 사람은 메일을 받아
+  넘긴 전달자일 수 있다. 원 발신자(인용문의 From)와 최종 조치자를 본다.
+  · 사양·용기·포장 승인 변경 → GM(제품·포장 승인 담당)
+  · 금형·부품 사양·품질 → 설계·품질 담당
+  · 선적·통관·부킹 → 해외물류부 / 발주·도입 → 조달물류팀 / 인사·급여·근태 → 경영지원팀
+  · 원인을 제공한 협력사가 조치해야 하면 → 협력사 OO(개선 조치)
+- mainDept 표기: `주체(역할)` 로 쓰고, 우리 팀이 참조면 뒤에 붙인다.
+  예) "GM 염주희 차장(용기 사양 승인·결정) · 우리 부서(납입1팀)는 참조"
+  예) "협력사 ILLINOIS TOOL WORKS(승인 용기 공급) · GM(사양 승인) · 우리 부서(납입1팀)는 참조"
+- deptBasis: 그 판단 근거 1줄 — 누가 무엇을 결정·조치해야 하는지가 본문·인용 어디에 근거가 있는지.
 - **수신(To)에 우리 팀이 들어 있다는 사실만으로 우리 팀 주담당이라고 쓰지 않는다.** 본문에서 실제 요청·회신을 받는
   부서/사람이 따로 있으면(예: 선적·통관→해외물류부, 도입·발주→조달물류팀, 생산·공정→제조부, 인사·급여→경영지원팀)
   mainDept 는 그 부서로 쓴다. 우리 팀이 참조(CC)로만 있고 본문 지목도 없으면 replyStatus 는 no_reply_needed.
 - **발신자가 To 를 다른 담당자·다른 부서로 지정하고 우리 팀은 참조(CC)에만 있으면, 우리 팀 이름·팀원 이름이
   인용문·서명·이전 회신에 스쳐 나오더라도 주담당을 우리 팀으로 올리지 않는다.** 새로 쓴 본문에서 우리 팀·팀원에게
   직접 요청한 문장(예: "납입1팀 확인 부탁드립니다", "김성규 과장님 회신 부탁드립니다")이 있을 때만 직접 회신으로 본다.
-  그 외에는 mainDept 를 실제 요청받은 담당자/부서로 쓰고 `[직접 조치 없음 · 타 부서(OOO) 주담당 · 참조 흐름 파악 필요]`,
-  replyStatus 는 no_reply_needed 로 결론낸다.
 - **발신자가 나 또는 우리 부서(팀) 팀원이면 우리가 이미 보낸 메일이다** (예: 납입1팀 강한 사원 → 경영지원팀 정하건).
   발신자에게 다시 회신하라는 결론을 절대 쓰지 않는다. `RE:` 답장이거나 본문에 `해당자 없습니다`·`송부드립니다`·
   `회신드립니다`·`전달드립니다`·`확인 완료` 같은 회신·송부 완료 표현이 있으면 ourDeptAction 을
@@ -3431,23 +3519,29 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
 [ourDeptAction / myAction — 3) 결론]
 - **금지 문구**: "본문 요청 내용 확인 후 회신", "본문 확인 후 회신", "본문 확인 후 조치", "본문 요청 확인",
   "내용 확인 후 회신" 같은 두루뭉술한 상투어. **맡은 일이 없다는 뜻의 짧은 마무리도 절대 쓰지 않는다.**
-  할 일이 없으면 왜 없는지(타 부서 주담당·기록 보관)와 무엇을 계속 볼지(참조 흐름·모니터링)를 적는다.
+  할 일이 없으면 왜 없는지(타 주체 주담당·기록 보관)와 무엇을 계속 볼지(핵심 관건·모니터링)를 적는다.
+- **타 부서·고객사·협력사가 주담당인 건도 빈칸이나 상투어로 끝내지 않는다.** 이 스레드에서 우리 팀이 지켜볼
+  **실제 관건**을 한 줄로 쓴다.
+  · 형식: `[참조 모니터링 · 핵심 관건: 무엇이 결정되면 이 건이 끝나는지 + 우리 현장·납입에 미치는 영향]`
+  · 예) `[참조 모니터링 · 핵심 관건: 용기 사양 개선(HSC 승인 용기로 변경) 여부 vs 현장 지속 절단 필요 여부 — 입고 지연 시 조립 라인 결품 위험]`
+  · "무엇이 결정되면 끝나는가"(사양 변경 승인 여부, 회신 마감, 재고 소진 시점, 공급 재개일)가 드러나야 한다.
+  · `[직접 조치 없음 · 참조 흐름 파악 필요]` 처럼 무엇을 볼지 없는 문구만 쓰지 않는다.
 - ourDeptAction: [구체적 행위 + 대상/품번·기준 + 회신 대상자·형태] 가 드러나게 한 줄로 쓴다.
   · 직접 할 일이 있으면 `[직접 회신 필요] 11/25(수) 07시 기준 2품번(13524683·13540045) 재고조사 결과 정리 → 요청자(유광승 과장)에게 회신`
     처럼 날짜·품번·수량·회신 대상을 원문 값으로 넣는다.
-  · 우리 부서 일이 아니면 `[직접 조치 없음 · 타 부서(해외물류부) 주담당 · 참조 흐름 파악 필요]`
-    또는 `[타 부서(해외물류부) 진행 건 · 납입 영향 여부 모니터링]`.
+  · 우리 부서 일이 아니면 위 관건 형식으로 쓴다(또는 `[타 부서(해외물류부) 진행 건 · 우리 납입 일정 영향 모니터링]`).
 - myAction: 나(수신자) 개인 기준 한 줄.
   · 내가 회신·조치할 건: `[직접 회신 필요] 서열자재 보급 기준 첫차·마지막 차량 PO 확인 후 요청자에게 회신`
-  · 참조만 된 건: `[참조 · 업무 흐름 파악 (별도 회신 불필요)]` 또는 `[타 부서 주담당 건 · 참조 모니터링 (확인 처리 권장)]`.
-- **주담당 판별 규칙**: 본문에서 실제 회신을 요구받은 대상이 다른 부서·다른 담당자면, 그 건은
-  `[직접 조치 없음 · 타 부서(OOO) 주담당 · …]` 으로 결론내고 replyStatus·actionItems 도 우리 팀 기준으로 비운다.
+  · 참조만 된 건: `[참조 · 핵심 관건 (예: 승인 용기 변경 여부) 확인 후 필요 시 우리 현장 의견 전달]`
+    또는 `[참조 모니터링 · 우리 납입 일정·재고 영향 여부 확인 (별도 회신 불필요)]`
+- **주담당 판별 규칙**: 본문에서 실제 회신을 요구받은 대상이 다른 주체면, 그 건은 타 주체 결론으로 쓰고
+  replyStatus·actionItems 도 우리 팀 기준으로 비운다. 단, 결론 문구에 그 건의 핵심 관건은 반드시 남긴다.
 
 [headline]
 - 목록·검색에 쓰는 한 줄(60자 이내). "누가 → 무엇을 요청" 형태. 3단 요약을 다시 쓰지 않는다.
 
 [summary]
-- 위 재료를 3단 그대로 옮긴 텍스트. timeline·mainDept·deptBasis·ourDeptAction·myAction 을 채우면
+- 위 재료를 3단 그대로 옮긴 텍스트. background·timeline·mainDept·deptBasis·ourDeptAction·myAction 을 채우면
   화면이 같은 형식으로 다시 조립하므로, 재료를 정확히 채우는 것이 우선이다.
 - 수신인·참조 설명("수신 A·B(To)", "김성규 과장은 참조", "내 조치 없음")은 쓰지 않는다. 수신 정보는 별도 필드로 저장된다.
 - 날짜·품번·수량·기한 같은 사실은 원문 그대로 옮긴다. 추측은 "확인 필요"로 표시한다.
@@ -3487,7 +3581,8 @@ GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내�
 [category] 승인/검토, PTR, 결품/보고, 불량/품질, 재고/실사, 현황/보고, 출하/보급, 납입요청, 일정/공유,
 조직/업무, 공지/안전, 자료요청, 자재/확인, 기타 중 하나.
 [urgency] normal/high/urgent. [threadGist] 스레드에 한 줄로 남길 이 메일의 핵심(40자 이내).
-[tags] 품번·차종·키워드 0~5개."""
+[tags] 품번·차종·키워드 0~5개.
+"""
 
 
 def model_hint(text: str, *, current: str = "") -> str:

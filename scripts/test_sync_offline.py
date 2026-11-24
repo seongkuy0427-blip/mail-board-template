@@ -1172,6 +1172,78 @@ def run(pin: str, keep: bool) -> int:
           team_req_ruling["sender_ours"] and not team_req_ruling["reply_done"]
           and "회신 대기" in team_req_our and "강한에게" not in team_req_our, team_req_our)
 
+    # ── v1.2.22 맥락 중심 3단 분석 — HSC(승인 용기) vs RSC(실제 입고) 용기 개선 스레드 (#9508)
+    #    사용자 스크린샷 1000025163: 원본을 열지 않아도 "왜 열상 위험이 생겼고 누가 결정하며
+    #    우리가 무엇을 지켜볼지"가 3단에 남아야 한다.
+    cont_contacts = {
+        "kimpro@chunil.co.kr": {"name": "김성규", "title": "과장", "dept": "납입1팀"},
+        "seyu@chunil.co.kr": {"name": "김세유", "title": "과장", "dept": "납입관리부"},
+        "seoyuntae@naver.com": {"name": "서윤태", "title": "부장", "dept": ""},
+        "joohee.yeom@gm.com": {"name": "염주희", "title": "차장", "dept": ""},
+    }
+    cont_mail = {
+        "mf_no": "5418801",
+        "subject": ("FW: [EXTERNAL] RE: PCR _ ILLINOIS TOOL WORKS INC (US) 099051716 - 11571063 "
+                    "( PIN-RETAINER ) - 용기 개선 요청 (HSC TYPE)"),
+        "from_raw": '"김세유" <seyu@chunil.co.kr>', "from_email": "seyu@chunil.co.kr",
+        "to": ["서윤태 <seoyuntae@naver.com>"],
+        "cc": ["김성규 <kimpro@chunil.co.kr>"],
+        "date": "2026-11-24 16:04",
+        "bodyText": ("서윤태 부장님, GM 요청 건 전달드립니다.\n\n"
+                     "-----Original Message-----\nFrom: Joohee Yeom <joohee.yeom@gm.com>\n"
+                     "Sent: 2026-11-18 16:12\nSubject: RE: 용기 개선 요청 (HSC TYPE)\n\n"
+                     "킨택 부장님, 하기 PIN-RETAINER 납품 업체에서는 기 용기 승인된 박스로 납품이 안되고 있습니다.\n"
+                     "현재 조립 라인에서 RSC 로 입고되는 용기 상단을 잘라서 보급해달라고 하는데, "
+                     "해당 작업시 보급 작업자 열상 등 위험요소 있습니다.\n"
+                     "업체에서는 용기 승인서 대로 공급 필요합니다."),
+    }
+    cont_ruling = sm.dept_ruling(cont_mail, cont_contacts)
+    check("용기 개선 전달 메일 — 우리 팀은 참조(주담당을 우리 팀으로 올리지 않음)",
+          not cont_ruling["ours"] and "서윤태" in cont_ruling["main"], str(cont_ruling)[:90])
+    cont_ai = {
+        "background": ("승인된 용기는 HSC 타입인데 현장에는 RSC 로 입고되어 보급 작업자가 상단을 잘라 쓰고 있고, "
+                       "그 절단 작업이 열상 위험을 만든다. GM 은 승인 용기로의 개선 여부를 검토 중이고, "
+                       "협력사는 승인서대로 공급해야 한다는 입장이며, 현장은 절단 없는 보급을 원한다."),
+        "timeline": ["[11/18 16:12] GM 염주희 차장 → 납입1팀·협력사 : 승인 용기(HSC)와 달리 RSC 로 입고돼 "
+                     "현장 상단 절단 중, 열상 위험 — 승인 용기로 긴급 납품 요청"],
+        "mainDept": "GM 염주희 차장(용기 사양 승인·결정) · 우리 부서(납입1팀)는 참조",
+        "deptBasis": "GM 원문이 승인 용기 공급을 요구 — 전달자 서윤태 부장은 중간 수신자",
+        "ourDeptAction": ("[참조 모니터링 · 핵심 관건: 용기 사양 개선(HSC 승인 용기로 변경) 여부 vs "
+                          "현장 지속 절단 필요 여부 — 입고 지연 시 조립 라인 결품 위험]"),
+        "myAction": "[참조 · 핵심 관건(승인 용기 변경 여부) 확인 후 필요 시 우리 현장 의견 전달]",
+        "summary": "", "replyStatus": "needs_reply", "actionItems": ["용기 개선 진행 상황 확인"],
+        "category": "승인/검토", "urgency": "normal", "threadGist": "용기 HSC/RSC 개선 요청 전달",
+    }
+    cont_out = sm.normalize_analysis(dict(cont_ai), cont_mail, None, cont_contacts)
+    check("1단이 ‘배경 → 흐름’ — 배경이 타임라인보다 먼저", 
+          "1) 🔄 업무 진행 경과 (배경 → 흐름)" in cont_out["summary"]
+          and cont_out["summary"].index("- 배경:") < cont_out["summary"].index("[11/18"),
+          cont_out["summary"][:120])
+    check("AI 가 쓴 핵심 관건을 상투어로 덮어쓰지 않는다",
+          "핵심 관건" in cont_out["ourDeptAction"] and "HSC" in cont_out["ourDeptAction"]
+          and "직접 조치 없음" not in cont_out["ourDeptAction"], cont_out["ourDeptAction"])
+    check("‘· 우리 부서(...)는 참조’ 꼬리 때문에 주담당을 되돌리지 않는다",
+          "GM 염주희" in cont_out["mainDept"] and "GM 원문이" in cont_out["deptBasis"], cont_out["mainDept"])
+    check("참조 건 — 회신 필요 없음·할 일 비움",
+          cont_out["replyStatus"] == "no_reply_needed" and cont_out["actionItems"] == [],
+          f'{cont_out["replyStatus"]} {cont_out["actionItems"]}')
+    cont_vague = sm.polish_actions({"ourDeptAction": "[직접 회신 필요] 결과 회신",
+                                    "myAction": "[할 일 없음(확인 처리 권장)]"},
+                                   cont_mail, cont_contacts)
+    check("구체성 없는 AI 결론은 그대로 두지 않고 상투어 교정",
+          cont_vague["ourDeptAction"].startswith("[직접 조치 없음") and "모니터링" in cont_vague["myAction"],
+          cont_vague["ourDeptAction"])
+    cont_direct = sm.polish_actions(
+        {"ourDeptAction": "[직접 회신 필요] 11/25까지 GM 염주희 차장에게 승인 용기 변경 여부 회신",
+         "myAction": "[참조 · 업무 흐름 파악]"}, cont_mail, cont_contacts)
+    check("참조 건의 ‘직접 회신 필요’는 [참조 모니터링] 으로 바꾸되 내용은 살린다",
+          cont_direct["ourDeptAction"].startswith("[참조 모니터링]")
+          and "승인 용기" in cont_direct["ourDeptAction"], cont_direct["ourDeptAction"])
+    check("프롬프트가 배경·실질 주담당·핵심 관건을 요구",
+          all(k in sm.SYSTEM_PROMPT for k in ("[background", "왜 이슈가 생겼는지", "각 주체의 입장과 어려움",
+                                              "실제로 결정·개선·조치할 주체", "핵심 관건", "참조 모니터링")))
+    check("AI 본문 상한 10,000자", sm.ANALYSIS_BODY_CHARS == 10000, sm.ANALYSIS_BODY_CHARS)
+
     check("명칭 통일 — AI 생략 안내가 ‘기록 보관‘", sm.SKIP_SIMPLE_SUMMARY.startswith("기록 보관")
           and "단순 공유" not in sm.SKIP_SIMPLE_SUMMARY, sm.SKIP_SIMPLE_SUMMARY)
 
