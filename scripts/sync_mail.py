@@ -2041,35 +2041,46 @@ def _draft_attach_line(atts: list[dict]) -> str:
 
 
 def _draft_core(text: str) -> str:
-    """예전 초안에서 인사말·수신/제목 줄·서명을 걷어낸 '알맹이'만 남긴다."""
-    paras = [re.sub(r"[ \t]+", " ", p).strip()
-             for p in re.split(r"\n\s*\n", str(text or "").replace("\r", ""))]
-    keep: list[str] = []
-    for p in paras:
-        if not p:
+    """예전 초안에서 인사말·수신/제목 줄·서명을 걷어낸 '알맹이'만 남긴다.
+
+    한 줄짜리로 붙어 온 초안("○○님, 안녕하세요.\\n…내용…\\n감사합니다.\\n○○ 드림")에서도
+    내용이 사라지지 않게 줄 단위로 걷어낸다.
+    """
+    out: list[str] = []
+    for raw in str(text or "").replace("\r", "").split("\n"):
+        s = re.sub(r"[ \t]+", " ", raw).strip()
+        if not s:
+            if out and out[-1] != "":
+                out.append("")
             continue
-        if GREET_ONLY_RE.match(p):
+        if GREET_ONLY_RE.match(s):
             continue
-        if GREET_ANY_RE.search(p) and len(p) < 90:              # "OOO 님, 안녕하세요." 한 줄
+        if DRAFT_HEAD_RE.match(s):
             continue
-        if DRAFT_HEAD_RE.match(p):
+        if re.match(r"^(?:감사합니다|수고하십시오)\s*[.!]?$", s):
             continue
-        if re.match(r"^(?:감사합니다|수고하십시오)\s*[.!]?$", p):
+        if re.search(r"(?:드림|배상)\s*$", s) and len(s) < 40:
             continue
-        if re.search(r"(?:드림|배상)\s*$", p) and len(p) < 40:
+        if re.match(r"^천일정기화물자동차", s) and len(s) < 60:     # 소속 소개 줄
             continue
-        if re.match(r"^천일정기화물자동차", p) and len(p) < 60:   # 소속 소개 줄
+        # "○○님, 안녕하세요." 처럼 호칭+인사가 한 줄에 붙은 경우 인사 부분만 걷어낸다
+        s = re.sub(r"^\s*(?:[가-힣]{2,4}\s+)?(?:[가-힣]{2,3}\s*님\s*,?\s*)?"
+                   r"(?:안녕하십니까|안녕하세요|수고하십니다)\s*[,.!]?\s*", "", s).strip()
+        if not s:
             continue
-        if re.match(r"^(?:확인|검토|참고)\s*(?:후|부탁|바랍니다|해\s*주)", p) and len(p) < 90:
-            continue                                            # "확인 후 말씀해 주세요" 맺음말
-        if re.search(r"추가로?\s*(?:필요한|확인할)\s*(?:사항|부분)이?\s*있으면", p) and len(p) < 110:
-            continue                                            # 맺음말 중복 방지
-        if re.match(r"^.{0,60}(?:확인했습니다|접수했습니다|확인하였습니다)[.\s]*$", p):
+        if re.match(r"^[가-힣]{2,4}\s*(?:[가-힣]{2,3}님)?\s*[,.]?$", s):   # 이름만 있는 줄
+            continue
+        if re.match(r"^(?:확인|검토)\s*(?:후|부탁)", s) and len(s) < 90:     # 맺음말
+            continue
+        if re.search(r"추가로?\s*(?:필요한|확인할)\s*(?:사항|부분)이?\s*있으면", s) and len(s) < 110:
+            continue
+        if re.match(r"^(?=[^0-9]*$).{0,60}(?:확인했습니다|접수했습니다|확인하였습니다)[.\s]*$", s):
             continue                                            # "…확인했습니다." 만 있는 줄
-        keep.append(p)
-        if len(keep) >= 5:
+        out.append(s)
+        if len(out) >= 8:
             break
-    return "\n\n".join(keep)[:600]
+    core = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    return core[:600]
 
 
 def _owner_sign() -> tuple[str, str]:
