@@ -219,11 +219,13 @@ python test_server.py -v
 python3 check_ui.py            # index.html 스크립트 문법 + 가짜 DOM 실행
 python3 check_rules_list.py    # ⚙️ 설정 목록 60건 + 더 보기
 python3 check_case_ai.py       # 🔗 유사 사례 · ✨ AI 정밀 분석 렌더
+python3 check_ui.py            # 📝 메일 분석 3단 · [✨ AI 요약 실행] 렌더도 함께 점검
 ```
 
 검증 항목: 로그인 성공/실패 · 사용자 간 데이터 격리 · 최초 로그인 백그라운드 수집과 진행률 · `/api/state` 저장·복원 ·
 조직도 공용/개인주소록 격리 · `cred.enc` 암호화 라운드트립 · 정적 화면·포털 플래그 · 로그아웃 · Gemini 경로 · 수동 새로고침 반영 ·
 **과거 메일 백필(배치 병합·이미 기록 있는 보드 건너뜀)** · **`/api/similar` 캐시 히트** ·
-**자동 업데이트(manifest sha256 비교 → index.html 무재시작 교체 · 손상된 .py 교체 거부)**.
+**자동 업데이트(manifest sha256 비교 → index.html 무재시작 교체 · 손상된 .py 교체 거부)** ·
+**메일 분석 3단(진행 경과·주담당·결론) · 스레드 증분 캐시 · ⚪ 단순 공유 Zero-Token · `POST /api/mail/analyze` 온디맨드 분석**.
 
 `check_*.py` 는 `quickjs` 가 필요합니다(`pip install quickjs`). 없으면 test_server.py 만 돌려도 됩니다.

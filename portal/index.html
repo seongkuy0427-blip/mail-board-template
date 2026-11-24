@@ -668,6 +668,31 @@
   .dr-summary p{margin:0 0 10px; white-space:pre-line}
   .dr-summary p:last-child{margin-bottom:0}
   .dr-summary .sum-k{display:inline-block; min-width:42px; margin-right:7px; color:var(--ink); font-weight:600}
+  /* 📝 메일 분석 3단(진행 경과 · 주담당 · 결론) — v1.2.11 */
+  .ana{display:flex; flex-direction:column; gap:8px}
+  .ana-step{border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:var(--card)}
+  .ana-step.s2{background:#fbfbfd}
+  .ana-step.s3{background:var(--brand-weak); border-color:#dcdef7}
+  .ana-h{display:flex; align-items:center; gap:6px; font-size:12.1px; font-weight:650; color:var(--ink); margin-bottom:4px}
+  .ana-h .num{font-size:10px; font-weight:700; color:#fff; background:var(--brand); border-radius:4px; padding:1px 4px; letter-spacing:0}
+  .ana-h .t{flex:1; min-width:0; overflow-wrap:anywhere}
+  .ana-l{font-size:12.3px; color:var(--ink-2); line-height:1.62; padding:2px 0 2px 9px; position:relative;
+    white-space:pre-wrap; overflow-wrap:anywhere}
+  .ana-l::before{content:""; position:absolute; left:1px; top:9px; width:3px; height:3px; border-radius:50%; background:#c8ccd6}
+  .ana-k{display:inline-block; margin-right:6px; color:var(--ink); font-weight:650}
+  .ana-none{color:var(--ink-3); font-weight:600}
+  .ana-act{color:var(--brand); font-weight:650}
+  .ana-skip{border:1px dashed #d6d9e2; border-radius:9px; padding:10px 12px; background:#fbfbfc;
+    display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap}
+  .ana-skip .msg{flex:1; min-width:170px; font-size:12.3px; color:var(--ink-2); line-height:1.62}
+  .ana-skip .hd{display:block; font-size:11.4px; color:var(--ink-3); margin-top:2px}
+  .ana-skip .ana-l{padding-left:0}
+  .ana-skip .ana-l::before{display:none}
+  .ana-ai{flex:none; border:1px solid var(--brand); color:var(--brand); background:#fff; border-radius:7px;
+    padding:4px 9px; font-size:11.3px; font-weight:600; cursor:pointer; align-self:center}
+  .ana-ai:hover{background:var(--brand-weak)}
+  .ana-ai:disabled{opacity:.55; cursor:default}
+  .ana-ai.on{border-color:var(--green); color:var(--green)}
   .dr-meta{font-size:10.8px; color:var(--ink-3); margin-top:5px; display:flex; flex-wrap:wrap; gap:2px 9px}
   .dr-meta b{color:var(--ink-2); font-weight:500}
   .todo{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px}
@@ -1203,6 +1228,10 @@
     .dr-head h2{font-size:14px}
     .dr-sec{padding:10px 12px; overflow-x:auto}
     .dr-summary{font-size:12.2px; line-height:1.68}
+    .ana-step{padding:8px 9px}
+    .ana-l{font-size:11.9px}
+    .ana-h{font-size:11.7px}
+    .ana-ai{font-size:10.8px; padding:4px 7px}
     .dr-addr{font-size:10.9px; padding:6px 9px}
     .dr-addr .ak{width:50px; font-size:10px}
     .dr-meta{font-size:10.4px}
@@ -1380,7 +1409,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.10</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.11</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1591,7 +1620,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.10").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.11").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -3089,7 +3118,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     return null;
   }
   function titleBlob(it) {
-    return [it.title, it.sender, it.summary, (it.tags || []).join(" ")].join("\n").toLowerCase();
+    /* v1.2.11 — 검색은 3단 요약 전체 + 한 줄 headline 을 함께 본다(긴 분석문이 첫 줄을 밀어내지 않게) */
+    return [it.title, it.sender, it.headline, it.summary, (it.tags || []).join(" "), (it.mainDept || "")].join("\n").toLowerCase();
   }
   function hasKw(blob, k) {
     if (blob.indexOf(k) !== -1) return true;
@@ -4623,6 +4653,105 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }).join("");
   }
 
+  /* ───── 📝 메일 분석 3단 렌더 (v1.2.11) ─────
+     서버가 조립한 `1) 🔄 진행 경과 / 2) 🎯 주담당 판별 / 3) ✅ 결론` 을 소제목 카드로 나눠 보여 준다.
+     예전 1줄 요약 메일은 그대로 summaryHtml() 로 호환한다.
+     AI 를 건너뛴 메일(⚪ 단순 공유 · 타 부서 참조)은 안내 문구와 [✨ AI 요약 실행] 버튼을 보여 준다(포털). */
+  const ANA_HEAD = /^\s*([123])\s*[).]\s*(🔄|🎯|✅)\s*(.*)$/;
+  function parseAnalysis(text) {
+    const out = [];
+    let cur = null;
+    String(text || "").split(/\r?\n/).forEach((line) => {
+      const m = line.match(ANA_HEAD);
+      if (m) {
+        cur = { num: m[1], icon: m[2], title: (m[3] || "").trim(), rows: [] };
+        out.push(cur);
+        return;
+      }
+      if (!line.trim()) return;
+      if (!cur) { cur = { num: "", icon: "", title: "", rows: [] }; out.push(cur); }
+      cur.rows.push(line.trim());
+    });
+    return out.filter((s) => s.rows.length || s.title);
+  }
+  function anaRowHtml(row) {
+    const t = row.replace(/^[-•·]\s*/, "");
+    const m = t.match(/^([^:：]{2,14})\s*[:：]\s*(.+)$/);
+    if (!m) return '<div class="ana-l">' + esc(t) + "</div>";
+    const k = m[1].trim(), v = m[2].trim();
+    const cls = /^\[?\s*(없음|할 일 없음|단순 참조)/.test(v) ? "ana-none"
+      : (/^\[?\s*(직접|팀원)/.test(v) ? "ana-act" : "");
+    return '<div class="ana-l"><b class="ana-k">' + esc(k) + "</b>" +
+      (cls ? '<span class="' + cls + '">' + esc(v) + "</span>" : esc(v)) + "</div>";
+  }
+  function analysisStepsHtml(steps) {
+    return '<div class="ana">' + steps.map((s) => {
+      const head = '<div class="ana-h">' +
+        (s.num ? '<span class="num">' + esc(s.num) + "</span>" : "") +
+        (s.icon ? '<span aria-hidden="true">' + s.icon + "</span>" : "") +
+        '<span class="t">' + esc(s.title || "") + "</span></div>";
+      return '<div class="ana-step s' + (s.num || "0") + '">' + head + s.rows.map(anaRowHtml).join("") + "</div>";
+    }).join("") + "</div>";
+  }
+  function analysisSkipHtml(it) {
+    const rows = [];
+    if (it.mainDept) rows.push('<div class="ana-l"><b class="ana-k">주담당</b>' + esc(it.mainDept) + "</div>");
+    if (it.ourDeptAction) rows.push('<div class="ana-l"><b class="ana-k">우리 부서</b><span class="ana-none">' + esc(it.ourDeptAction) + "</span></div>");
+    if (it.myAction) rows.push('<div class="ana-l"><b class="ana-k">나</b><span class="ana-none">' + esc(it.myAction) + "</span></div>");
+    const hd = it.headline ? '<span class="hd">· ' + esc(it.headline) + "</span>" : "";
+    const btn = PORTAL
+      ? '<button type="button" class="ana-ai" data-ai-analyze="' + esc(it.id) + '" title="이 메일만 Gemini 로 전체 스레드·부서 매핑·3단 분석을 실행합니다 (결과는 보드에 저장)">✨ AI 요약 실행</button>'
+      : "";
+    return '<div class="ana-skip"><div class="msg">🤖 ' + esc(it.summary || "AI 분석을 생략했습니다.") + hd +
+      rows.join("") + "</div>" + btn + "</div>";
+  }
+  function analysisBlock(it) {
+    const raw = String(it.summary || "").trim();
+    const steps = parseAnalysis(raw);
+    let out = it.aiSkipped ? analysisSkipHtml(it) : "";
+    if (steps.length >= 2) out += analysisStepsHtml(steps);
+    else if (!it.aiSkipped && raw) out += '<div class="dr-summary">' + summaryHtml(raw) + "</div>";
+    return out || '<span class="none">분석 내용이 없습니다.</span>';
+  }
+
+  /* ✨ AI 요약 실행 — AI 를 건너뛴 메일 1통을 그때만 정밀 분석한다(포털 전용, 결과는 서버에 저장). */
+  const AI_ANA = new Map();          /* mailId → done|error */
+  function aiAnaPaint(id) {
+    if (view.openId !== id) return;
+    const it = byId(id);
+    const box = $("drawerContent").querySelector("#drAnalysis .ana-wrap");
+    if (box && it) box.innerHTML = analysisBlock(it);
+  }
+  async function aiAnalyzeMail(id) {
+    const it = byId(id);
+    if (!it || !PORTAL || AI_ANA.get(id) === "loading") return;
+    AI_ANA.set(id, "loading");
+    const btn = $("drawerContent").querySelector('[data-ai-analyze="' + id + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = "🤖 분석 중…"; }
+    try {
+      const res = await fetch("/api/mail/analyze", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!data || !data.ok || !data.analysis) {
+        toast((data && data.message) || "AI 분석에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+        AI_ANA.delete(id);
+        if (btn) { btn.disabled = false; btn.textContent = "✨ AI 요약 실행"; }
+        return;
+      }
+      Object.keys(data.analysis).forEach((k) => { it[k] = data.analysis[k]; });
+      it.aiSkipped = false;
+      AI_ANA.set(id, "done");
+      aiAnaPaint(id);
+      renderList();
+    } catch (err) {
+      AI_ANA.delete(id);
+      toast("AI 분석에 실패했습니다. 서버 연결을 확인해 주세요.");
+      if (btn) { btn.disabled = false; btn.textContent = "✨ AI 요약 실행"; }
+    }
+  }
+
   /* ---------------- 🔗 유사 · 과거 동일 사례 자동 연결 -------------
      전체 메일(기본 + 과거기록 — 2026-11-21 기준 9,183건)을 한 번 훑어 색인을 만들고,
      상세 드로어를 열 때마다 ‘같은 스레드를 뺀’ 유사 사례를 최대 6건 골라 붙인다.
@@ -4729,7 +4858,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
       if (!it) continue;
       ix.ids[i] = it.id; ix.at.set(it.id, i);
       const titleSet = caseTokens(caseStripMail(it.title || ""));
-      const textSet = caseTokens(caseStripMail((it.title || "") + " " + (it.summary || "") + " " + ((it.actionItems || []).join(" "))));
+      const textSet = caseTokens(caseStripMail((it.title || "") + " " + (it.headline || it.summary || "") + " " + ((it.actionItems || []).join(" "))));
       const codesSet = caseCodes((it.title || "") + " " + (it.summary || ""));
       ix.tit[i] = titleSet; ix.tok[i] = textSet; ix.cod[i] = codesSet;
       textSet.forEach((w) => {
@@ -5192,7 +5321,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
         '<div class="dr-sec"><div class="sec-h">📄 메일 원문</div>' + addrBlockHtml(it) +
           body + imgHtml + attBlock + "</div>" +
         /* 2. 메일 분석 — 내용 분석만, 단락 나눠서 */
-        '<div class="dr-sec"><div class="sec-h">📝 메일 분석</div><div class="dr-summary">' + summaryHtml(it.summary) + "</div>" +
+        '<div class="dr-sec" id="drAnalysis"><div class="sec-h">📝 메일 분석</div><div class="ana-wrap">' + analysisBlock(it) + "</div>" +
           (it.repliedNote && !stateOf(it).reply ? '<div class="att-sum" style="margin-top:6px">↩️ ' + esc(it.repliedNote) + "</div>" : "") + "</div>" +
         /* 2-1. 💡 새·미확인 메일에 대한 과거 유사 사례 제안 (누르면 아래 🔗 섹션으로) */
         caseHintHtml(it, cases) +
@@ -5836,6 +5965,8 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     }
     const cai = e.target.closest("[data-case-ai]");
     if (cai) { e.preventDefault(); caseAiAnalyze(cai.dataset.caseAi); return; }
+    const mai = e.target.closest("[data-ai-analyze]");
+    if (mai) { e.preventDefault(); await aiAnalyzeMail(mai.dataset.aiAnalyze); return; }
     const caiClear = e.target.closest("[data-case-ai-clear]");
     if (caiClear) { e.preventDefault(); CASE_AI.delete(caiClear.dataset.caseAiClear); caseAiPaint(caiClear.dataset.caseAiClear); return; }
     const crow = e.target.closest("[data-case]");

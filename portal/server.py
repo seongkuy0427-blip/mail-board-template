@@ -70,7 +70,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.10"
+VERSION = "1.2.11"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1092,6 +1092,7 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         board.setdefault("items", [])
         board.setdefault("followups", [])
         board.setdefault("criteria", {})
+        board.setdefault("thread_cache", {})      # 스레드별 누적 타임라인(v1.2.11 증분 분석)
         update_user_meta(uid, owner=owner_box, needsRelogin=False, email=board["account"])
 
         # 직급 자동 추론 — 사내 조직도의 '직위' 칸이 비어 이름만 뜨는 경우를 보완한다.
@@ -1134,14 +1135,9 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         done = 0
 
         def analyze(mail: dict, kind: str) -> dict:
-            if gem is None:
-                return sm.heuristic_analysis(mail, sm._is_to(mail), contacts)
-            try:
-                report["gemini_calls"] += 1
-                return gem.analyze(mail, kind=kind)
-            except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
-                report["warnings"].append(f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}")
-                return sm.heuristic_analysis(mail, sm._is_to(mail), contacts)
+            # v1.2.11 — 단순 공유는 AI 생략, 타 부서 참조는 경량, 나머지는 3단 정밀 분석(스레드 증분)
+            return sm.analyze_mail(gem, mail, kind, contacts,
+                                   thread_cache=board["thread_cache"], stats=report)
 
         def tick(phase: str) -> None:
             nonlocal done
@@ -1544,6 +1540,82 @@ def similar_analyze(uid: str, mail_id: str) -> dict:
     print(f"[similar] {uid} {mail_id} 후보 {len(cands)}건 → AI 선별 {len(results)}건", flush=True)
     return {"ok": True, "cached": False, "id": mail_id, "count": len(results),
             "model": rec["model"], "at": rec["at"], "candidates": len(cands), "results": results}
+
+
+# ────────────────────────────────────────────────────────────── ✨ 메일 1통 온디맨드 3단 분석
+#  ⚪ 단순 공유·타 부서 참조로 AI 분석을 건너뛴 메일을, 사용자가 [✨ AI 요약 실행] 을 눌렀을 때만
+#  전체 스레드 + 조직 컨텍스트로 정밀 분석한다. 결과는 board.json 에 저장되어 다시 누르면 0 호출.
+ANALYSIS_FIELDS = ("summary", "headline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
+                   "threadGist", "actionItems", "replyDrafts", "replyStatus", "dueDate", "deadline",
+                   "category", "urgency", "tags")
+
+
+def analysis_fields(item: dict) -> dict:
+    """화면이 그대로 덮어쓸 수 있는 분석 필드만 골라 낸다."""
+    out = {k: item.get(k) for k in ANALYSIS_FIELDS if item.get(k) is not None}
+    out["aiSkipped"] = bool(item.get("aiSkipped"))
+    return out
+
+
+def mail_analyze(uid: str, mail_id: str) -> dict:
+    """메일 1통 정밀 분석 — 이미 정밀 분석된 메일이면 저장된 결과를 그대로 돌려준다."""
+    mail_id = str(mail_id or "").strip()
+    if not mail_id:
+        return {"ok": False, "code": "bad_request", "message": "메일 id 가 필요합니다."}
+    path = user_path(uid, "board.json")
+    board = read_json(path, None)
+    if not isinstance(board, dict):
+        return {"ok": False, "code": "no_board",
+                "message": "보드를 아직 읽지 못했습니다. 잠시 후 다시 시도해 주세요."}
+    item = next((it for it in board.get("items") or []
+                 if isinstance(it, dict) and str(it.get("id")) == mail_id), None)
+    if item is None:
+        return {"ok": False, "code": "not_found", "message": "이 메일을 보드에서 찾지 못했습니다."}
+    if not item.get("aiSkipped") and sm.is_detailed_summary(item.get("summary")):
+        return {"ok": True, "cached": True, "id": mail_id, "analysis": analysis_fields(item)}
+    if not CFG["gemini_key"]:
+        return {"ok": False, "code": "no_key",
+                "message": "Gemini API 키가 설정되지 않아 AI 분석을 쓸 수 없습니다 — "
+                           "서버 .env 에 GEMINI_API_KEY 를 넣고 서버를 다시 시작해 주세요."}
+
+    contacts_list = list((merged_contacts(uid).get("contacts") or []))
+    contacts = sm.load_contacts({"contacts": contacts_list})
+    mail = {
+        "mf_no": str(mail_id).split("-")[-1],
+        "subject": item.get("title") or "",
+        "bodyText": item.get("analysisBody") or item.get("bodyText") or "",
+        "from_raw": item.get("senderName") or item.get("sender") or "",
+        "from_email": item.get("senderEmail") or "",
+        "to": item.get("to") or [],
+        "cc": item.get("cc") or [],
+        "date": item.get("receivedAt") or "",
+        "attachments": item.get("attachments") or [],
+    }
+    stats: dict[str, Any] = {"gemini_calls": 0, "warnings": []}
+    with SYNC_LOCK:                 # sync_mail 의 전역 분류 상태(OWNER·ME)를 동기화와 섞지 않는다
+        owner = board.get("owner") or user_meta(uid).get("owner") or {}
+        sm.configure(owner, sm.load_board_config(CFG["board_config"]))
+        gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"])
+        analysis = sm.analyze_mail(gem, mail, "받은편지함", contacts,
+                                   thread_cache=board.setdefault("thread_cache", {}),
+                                   stats=stats, force_deep=True)
+    if analysis.get("aiSkipped"):     # force_deep 인데도 건너뛴 경우는 오류로 알린다
+        raise RuntimeError("AI 분석을 실행하지 못했습니다 (생략 판정)")
+    for key in ANALYSIS_FIELDS:
+        val = analysis.get(key)
+        if val is None:
+            continue
+        if key in ("actionItems", "replyDrafts"):
+            item[key] = val if isinstance(val, (list, dict)) else item.get(key)
+        elif val != "":
+            item[key] = val
+    item["aiSkipped"] = False
+    item.pop("aiSkipReason", None)
+    item["analyzedAt"] = stamp()
+    atomic_write_json(path, board, mode=0o600)
+    print(f"[analyze] {uid} {mail_id} 정밀 분석 완료 — Gemini {stats.get('gemini_calls', 0)}회", flush=True)
+    return {"ok": True, "cached": False, "id": mail_id, "analysis": analysis_fields(item),
+            "model": CFG["gemini_model"], "at": item["analyzedAt"]}
 
 
 # ────────────────────────────────────────────────────────────── 백그라운드 워커
@@ -2125,6 +2197,9 @@ class PortalHandler(BaseHTTPRequestHandler):
             if path == "/api/similar":
                 self._api_similar()
                 return
+            if path == "/api/mail/analyze":
+                self._api_mail_analyze()
+                return
             if path == "/api/state":
                 uid = self._require_user()
                 if not uid:
@@ -2285,6 +2360,32 @@ class PortalHandler(BaseHTTPRequestHandler):
         self._json(code, result)
         print(f"[similar] {uid} {mail_id} → {result.get('count', 0)}건"
               f"{' (캐시)' if result.get('cached') else ''}", flush=True)
+
+    def _api_mail_analyze(self) -> None:
+        """✨ AI 요약 실행 — 단순 공유로 건너뛴 메일 1통만 정밀 분석한다(결과는 보드에 저장)."""
+        uid = self._require_user()
+        if not uid:
+            return
+        try:
+            body = self._body_json(limit=8192)
+        except ValueError:
+            self._err(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "요청이 너무 큽니다")
+            return
+        try:
+            result = mail_analyze(uid, str(body.get("id") or ""))
+        except Exception as e:  # noqa: BLE001 - Gemini·네트워크 실패는 다시 시도할 수 있게 알려 준다
+            print(f"[analyze] {uid} 실패: {type(e).__name__}: {str(e)[:300]}", file=sys.stderr)
+            self._json(HTTPStatus.BAD_GATEWAY,
+                       {"ok": False, "code": "ai_failed",
+                        "message": similar_error_message(e)})
+            return
+        code = HTTPStatus.OK
+        if not result.get("ok"):
+            code = {"not_found": HTTPStatus.NOT_FOUND,
+                    "bad_request": HTTPStatus.BAD_REQUEST,
+                    "no_key": HTTPStatus.NOT_IMPLEMENTED,
+                    "no_board": HTTPStatus.CONFLICT}.get(str(result.get("code")), HTTPStatus.BAD_REQUEST)
+        self._json(code, result)
 
     def _api_state(self, uid: str) -> None:
         try:

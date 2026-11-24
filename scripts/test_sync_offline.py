@@ -277,12 +277,21 @@ class FakeGemini:
     def __init__(self, *a, **kw):
         self.calls = 0
 
-    def analyze(self, mail, *, kind="받은편지함", brief=False):
+    def analyze(self, mail, *, kind="받은편지함", brief=False, contacts=None, cache=None):
         self.calls += 1
         to_me = sm._is_to(mail)
         title = mail.get("subject", "")
+        _dept = sm.our_dept_label()
+        _tl = list((cache or {}).get("timeline") or [])
+        _tl.append(f"[{sm.short_when(mail.get('date') or mail.get('receivedAt'))}] 테스트 발신자 → {_dept} : "
+                   + (mail.get("subject") or "")[:40])
         return {
-            "summary": f"[테스트] {title[:40]} / 이슈→진행→남은 일 요약",
+            "timeline": _tl,
+            "mainDept": _dept,
+            "deptBasis": "우리 부서가 수신(To)" if to_me else "참조(CC)",
+            "ourDeptAction": "[직접 회신 필요] 확인 후 회신" if to_me else "[없음 (타 부서 주담당 · 단순 참조)]",
+            "myAction": "[직접 회신 필요] 확인" if to_me else "[할 일 없음(확인 처리 권장)]",
+            "headline": f"[테스트] {mail.get('subject', '')[:40]}",
             "actionItems": ["테스트 할 일 1"] if to_me else [],
             "dueDate": "2026-12-04" if "출하리스트" not in title else None,
             "deadline": "12/4(금)까지",
@@ -635,8 +644,9 @@ def run(pin: str, keep: bool) -> int:
         "from_email": "johhee.yeom@gm.com", "to": ["Seeyoung Pi (C) <seeyoung@chunil.co.kr>"]},
         False, {"seeyoung@chunil.co.kr": {"name": "피세영", "title": "대리", "dept": "납입1팀"},
                 "johhee.yeom@gm.com": {"name": "염주희", "title": "차장", "dept": "GM"}})
-    check("메일 분석 3인칭 요약(누가→누구에게→무엇을)",
-          eop["summary"].startswith("GM 염주희 차장이") and "피세영 대리" in eop["summary"]
+    check("메일 분석 3단(진행 경과·주담당·결론) — 누가→누구에게→무엇을",
+          eop["summary"].startswith("1) 🔄") and "2) 🎯" in eop["summary"] and "3) ✅" in eop["summary"]
+          and "GM 염주희 차장" in eop["summary"] and "피세영 대리" in eop["summary"]
           and "11/24 07:00 기준 재고실사" in eop["summary"]
           and "피세영 대리님," not in eop["summary"],
           eop["summary"][:90])
@@ -681,6 +691,100 @@ def run(pin: str, keep: bool) -> int:
           legacy_items[0]["replyDrafts"]["forward"].splitlines()[0][:40])
 
     check("기본 Gemini 모델", sm.DEFAULT_MODEL == "gemini-3.8-flash", sm.DEFAULT_MODEL)
+
+    # ─────────────────────────────────────────────────────────── v1.2.11
+    #  ⚪ 단순 공유 Zero-Token · 전체 스레드 보존 · 서명 잡음 제거 · 3단 분석 · 스레드 증분 캐시
+    if hasattr(sm, "configure"):
+        sm.configure({"name": "김성규", "title": "과장", "dept": "납입1팀",
+                      "email": "kimpro@chunil.co.kr", "company": "천일정기화물자동차"}, {})
+    dept = sm.our_dept_label()
+    contacts = {"kimpro@chunil.co.kr": {"name": "김성규", "title": "과장", "dept": "납입1팀"},
+                "seeyoung@chunil.co.kr": {"name": "피세영", "title": "대리", "dept": "납입1팀"},
+                "ryu@chunil.co.kr": {"name": "류광종", "title": "과장", "dept": "해외물류부"}}
+
+    thread_body = ("김성규 과장님,\n\n하기 품번 재고실사 요청드립니다.\n42711726 HOUSING AS 11EA\n\n"
+                   "—\nSCM사업본부 자동차물류사업부 납입1팀 과장 김성규\n"
+                   "주소 : 인천 부평구 부평대로 233\nTEL 032-330-2233 · Fax 032-330-3443\n"
+                   "Hi CHUNIL, High green\n본 메일은 지정된 수신인에게만 수신이 허용됩니다.\n\n"
+                   "-----Original Message-----\n보낸 사람: 염주희 <johhee.yeom@gm.com>\n"
+                   "보낸 날짜: 2026-11-20 09:12\n제목: MY26 EOP 재고실사\n\n"
+                   "명일 07시 기준 재고파악 부탁드립니다.\n")
+    thread_mail = {"mf_no": 990001, "subject": "MY26 EOP자재 재고실사 요청", "bodyText": thread_body,
+                   "from_raw": "염주희 <johhee.yeom@gm.com>", "from_email": "johhee.yeom@gm.com",
+                   "date": "2026-11-23 16:30", "to": ["피세영 <seeyoung@chunil.co.kr>"],
+                   "cc": ["김성규 <kimpro@chunil.co.kr>"]}
+    text = sm.analysis_body(thread_mail)
+    check("이전 회신 스레드 미절단(최초→최신 보존)",
+          "명일 07시 기준 재고파악" in text and "하기 품번 재고실사" in text,
+          text.replace("\n", " / ")[:90])
+    check("서명 부서·직급 1줄 보존 + 주소/TEL/슬로건/면책 제거",
+          "납입1팀 과장 김성규" in text
+          and not any(k in text for k in ("TEL 032-330-2233", "Hi CHUNIL", "지정된 수신인", "부평대로")),
+          repr(text[-90:]))
+
+    long_body = "\n\n".join(
+        f"보낸 사람: 사람{i} <p{i}@chunil.co.kr>\n보낸 날짜: 2026-11-{10 + i % 10:02d} 09:00\n"
+        f"{i}번째 회신 — 품번 1234{i} 확인 부탁드립니다." for i in range(12))
+    squeezed = sm.analysis_body({"bodyText": long_body})
+    check("10통 이상 스레드 — 최초 2 + 최근 4 원문 · 중간 1줄 압축",
+          "중간 6건 — 1줄 요약" in squeezed and "… 9번째 회신" in squeezed
+          and squeezed.count("보낸 사람:") == 6,
+          f"원문 {squeezed.count('보낸 사람:')}통")
+
+    gem_texts = []
+
+    class _Gem:
+        def analyze(self, mail, *, kind="", brief=False, contacts=None, cache=None):
+            gem_texts.append(sm.analysis_input_text(mail, kind, contacts=contacts, cache=cache, brief=brief))
+            tl = list((cache or {}).get("timeline") or [])
+            tl.append(f"[{sm.short_when(mail.get('date'))}] 염주희 차장 → {dept} : 재고실사 요청")
+            return {"timeline": tl, "mainDept": dept, "deptBasis": "우리 부서가 수신(To)",
+                    "ourDeptAction": "[직접 회신 필요] 결과 회신", "myAction": "[직접 회신 필요] 확인",
+                    "summary": "", "actionItems": [], "dueDate": None, "deadline": "별도 회신 기한 없음",
+                    "replyStatus": "needs_reply", "category": "재고/실사", "urgency": "normal",
+                    "threadGist": "재고실사", "tags": [], "replyDrafts": {}}
+
+    share = {"mf_no": 990002, "subject": "생산 1공장 6차 출하리스트 입니다.", "bodyText": "하기 첨부 참조.",
+             "from_raw": "조승환 <jsh3117@chunil.co.kr>", "from_email": "jsh3117@chunil.co.kr",
+             "date": "2026-11-23 10:09", "to": ["강한 <kanghan@chunil.co.kr>"],
+             "cc": ["김성규 <kimpro@chunil.co.kr>"]}
+    res = sm.analyze_mail(_Gem(), share, "받은편지함", contacts, thread_cache={})
+    check("⚪ 단순 공유 — AI 호출 0 · aiSkipped · 답장 초안 없음",
+          res["aiSkipped"] and res["aiSkipReason"] == "simple_share"
+          and res["summary"] == sm.SKIP_SIMPLE_SUMMARY and res["replyDrafts"] == {}
+          and len(gem_texts) == 0,
+          res["summary"])
+    named = dict(share, bodyText="출하리스트 입니다. 김성규 과장님 확인 부탁드립니다.")
+    res2 = sm.analyze_mail(_Gem(), named, "받은편지함", contacts, thread_cache={})
+    check("⚪ 단순 공유라도 나를 지목하면 정상 AI 분석",
+          not res2.get("aiSkipped") and len(gem_texts) == 1
+          and sm.is_detailed_summary(res2["summary"]) and "3) ✅" in res2["summary"],
+          res2["summary"].splitlines()[0])
+    other = dict(thread_mail, subject="12월 선복 부킹 확정 공유", bodyText="선복 부킹 확정되었습니다.",
+                 from_raw="류광종 <ryu@chunil.co.kr>", from_email="ryu@chunil.co.kr",
+                 to=["해외물류부 <overseas@chunil.co.kr>"], cc=["김성규 <kimpro@chunil.co.kr>"])
+    res3 = sm.analyze_mail(_Gem(), other, "받은편지함", contacts, thread_cache={})
+    check("타 부서 참조(CC) — 경량 요약 · AI 호출 없음",
+          res3["aiSkipped"] and res3["aiSkipReason"] == "other_dept"
+          and res3["summary"].startswith(sm.LIGHT_TAG) and len(gem_texts) == 1
+          and "없음" in res3["ourDeptAction"],
+          res3["summary"][:70])
+
+    store: dict = {}
+    first = dict(thread_mail, mf_no=990003, subject="RE: 스레드 증분 확인",
+                 bodyText="FIRSTBODY 첫 회신입니다. 11/24 07시 기준 재고실사 부탁드립니다.")
+    sm.analyze_mail(_Gem(), first, "받은편지함", contacts, thread_cache=store)
+    check("첫 분석은 전체 본문 전달",
+          "[기존 누적 타임라인]" not in gem_texts[-1] and "FIRSTBODY" in gem_texts[-1])
+    second = dict(first, mf_no=990004, date="2026-11-24 08:10",
+                  bodyText="SECONDBODY 결과 11EA/5EA 확인했습니다.")
+    res4 = sm.analyze_mail(_Gem(), second, "받은편지함", contacts, thread_cache=store)
+    check("2통째는 누적 타임라인 + 새 메일 1통만 전달",
+          "[기존 누적 타임라인]" in gem_texts[-1] and "[새로 추가된 메일 1통]" in gem_texts[-1]
+          and "SECONDBODY" in gem_texts[-1] and "FIRSTBODY" not in gem_texts[-1])
+    check("타임라인이 이어 붙는다", len(res4["timeline"]) == 2 and len(store) >= 1,
+          str(res4["timeline"]))
+
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:
         print("임시 폴더:", tmp)

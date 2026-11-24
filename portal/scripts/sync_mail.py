@@ -1496,6 +1496,558 @@ def clean_body(text: str) -> str:
     return strip_signature(strip_quoted(text or ""))
 
 
+# ══════════════════════════════════════════════════════════════ 메일 분석 입력 · 3단 분석 (v1.2.11)
+#  GM 처럼 여러 부서를 한꺼번에 수신/참조에 넣는 메일에서 "실제로 요청받은 주담당 부서"와
+#  "우리 부서(팀) 및 내가 할 일"을 가려내려면 입력이 달라져야 한다.
+#   ① 인용 구분선(-----Original Message-----·보낸사람: 등) 아래의 이전 회신을 자르지 않는다.
+#   ② 회사 슬로건·기밀 면책·주소/TEL/Fax 같은 서명 잡음만 걷어 내고 **부서·직급 각인 1줄은 남긴다**.
+#   ③ 사내 조직(우리 부서 인원 + To/CC 인원의 부서)을 프롬프트 컨텍스트로 함께 준다.
+#   ④ 같은 스레드가 이어지면 전체를 다시 보내지 않고 '누적 타임라인 + 새 메일 1통'만 보낸다(증분).
+#   ⑤ 우리 부서와 무관한 참조(CC)·단순 공유 메일은 무거운 분석을 건너뛴다(사용량 절감).
+#      — 건너뛴 메일은 화면에서 [✨ AI 요약 실행] 으로 그때만 정밀 분석할 수 있다(포털).
+OUR_DIVISION = ""                   # (개인판은 '납입관리부') CFG["our_dept"] 가 있으면 그것이 우선
+ANALYSIS_BODY_CHARS = 7000          # AI 에 보내는 본문 상한(전체 스레드 포함)
+THREAD_COMPRESS_AT = 10             # 이 통수 이상이면 중간 회신을 1줄로 압축
+THREAD_KEEP_ORIGIN = 2              # 압축할 때 원문을 그대로 두는 최초 메일 수
+THREAD_KEEP_RECENT = 4              # 압축할 때 원문을 그대로 두는 최근 메일 수
+THREAD_LINE_CHARS = 90              # 압축된 중간 메일 1줄 길이
+CACHE_TIMELINE_MAX = 16             # 스레드 캐시에 남기는 타임라인 줄 수
+THREAD_CACHE_MAX = 200              # 스레드 캐시 키 수 상한(data 파일 크기 보호)
+SKIP_SIMPLE_SUMMARY = "단순 공유 메일로 분류되어 AI 분석을 생략했습니다."
+LIGHT_TAG = "[타 부서 주담당 · 단순 참고]"
+
+THREAD_START_RE = re.compile(
+    r"^\s*(?:-{2,}\s*(?:original message|원본\s*메일|메일\s*원본|forwarded message|전달된 메일)\s*-{2,}.*"
+    r"|(?:보낸\s*사람|보낸사람|from)\s*[:：].*"
+    r"|on\s+.{0,80}wrote\s*:?\s*)$", re.I)
+#  1줄 압축할 때 '내용' 줄을 고르기 위해 건너뛰는 머리표 줄
+HEADER_ONLY_RE = re.compile(
+    r"^\s*(?:보낸\s*사람|보낸사람|보낸\s*날짜|받는\s*사람|참조|제목|from|sent|to|cc|bcc|subject|date)\s*[:：]",
+    re.I)
+
+#  서명 블록의 잡음 줄 — 줄 머리에서만 인정한다(본문 중간의 'Tel.' 오인 방지).
+SIG_NOISE_PATTERNS = (
+    r"^주소\s*[:：]", r"^우편번호", r"^(?:tel|t\.)\s*[:：]?", r"^전화\s*[:：]", r"^대표전화",
+    r"^fax\s*[:：]?", r"^팩스\s*[:：]?", r"^mobile\s*[:：]?", r"^hp\s*[:：]", r"^휴대폰\s*[:：]?",
+    r"^e-?mail\s*[:：]", r"^이메일\s*[:：]", r"^(?:https?://|www\.)",
+    r"^(?:copyright|ⓒ|©)", r"^무단\s*(?:전재|배포)", r"^본\s*메일", r"^이\s*메일은",
+    r"^(?:gm\s*)?confidential", r"^the\s*next\s*100", r"^hi\s*,?\s*chunil", r"^high\s*green",
+    r"^70\s*년의\s*경험",
+)
+DEPT_SIG_RE = re.compile(r"[가-힣A-Za-z0-9]{2,14}(?:사업본부|사업부|본부|관리부|물류부|영업부|팀|실|부)")
+RANK_SIG_RE = re.compile(r"(?:상무|전무|이사|부장|차장|과장|대리|사원|주임|계장|팀장|실장|소장|매니저)")
+
+
+def _clip(text: str, n: int) -> str:
+    s = _clean(text or "")
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
+def internal_domain() -> str:
+    """사내 메일 도메인 — 설정이 있으면 그것을, 없으면 chunil.co.kr."""
+    return str(globals().get("DOMAIN") or "chunil.co.kr").lstrip("@")
+
+
+def is_sig_noise_line(line: str) -> bool:
+    low = re.sub(r"\s+", " ", str(line or "")).strip().lower()
+    if not low:
+        return False
+    return any(re.match(p, low) for p in SIG_NOISE_PATTERNS)
+
+
+def is_dept_signature(line: str) -> bool:
+    """`자동차물류사업부 납입1팀 과장 김성규` 처럼 부서·직급이 함께 있는 각인 줄.
+
+    주담당 부서 판별의 근거이므로 서명 블록을 걷어 낼 때도 이 한 줄은 남긴다.
+    """
+    s = str(line or "").strip()
+    if not (6 <= len(s) <= 90):
+        return False
+    if not DEPT_SIG_RE.search(s):
+        return False
+    return bool(RANK_SIG_RE.search(s)) or bool(re.search(r"(?:팀|부|실)\s*$", s))
+
+
+def strip_slogan_lines(text: str) -> str:
+    """회사 슬로건·기밀 면책 줄만 걷어 낸다(직원 서명·이전 회신은 그대로)."""
+    return "\n".join(ln for ln in str(text or "").splitlines() if not is_sign_text(ln))
+
+
+SEP_ONLY_RE = re.compile(r"^[\s\-—–_=·•]+$")
+THREAD_SEP_ONLY_RE = re.compile(r"^\s*-{2,}\s*(?:original message|원본\s*메일|메일\s*원본|forwarded message|전달된 메일)\s*-{2,}\s*$", re.I)
+
+
+def squeeze_signatures(text: str) -> str:
+    """반복되는 하단 서명 블록(주소·TEL/Fax/Mobile·면책)을 걷어 내고 부서·직급 각인 1줄은 남긴다."""
+    out: list[str] = []
+    seen_sig: set[str] = set()
+    sig_tails: list[str] = []
+    for line in str(text or "").splitlines():
+        s = line.strip()
+        if not s:
+            out.append("")
+            continue
+        if SEP_ONLY_RE.match(s) or THREAD_SEP_ONLY_RE.match(s):
+            continue                                     # 서명 울타리(—, ---) · 인용 구분선만 있는 줄
+        if is_sig_noise_line(s):
+            continue
+        if is_dept_signature(s):
+            key = re.sub(r"\s+", " ", s)
+            tail = key[-20:]                              # 회사명이 앞에 붙어도 같은 사람으로 본다
+            if key in seen_sig or any(t and t in key for t in sig_tails):
+                continue                                  # 같은 서명이 회신마다 반복되면 한 번만
+            seen_sig.add(key)
+            sig_tails.append(tail)
+            out.append("· " + key)                        # 부서 판별용 각인 표시
+            continue
+        out.append(line)
+    txt = "\n".join(out)
+    txt = re.sub(r"[ \t]{2,}", " ", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
+
+
+def split_thread(text: str) -> list[str]:
+    """본문을 인용 헤더 기준으로 '메일 단위'로 나눈다(최신 메일이 앞)."""
+    text = str(text or "")
+    parts: list[str] = []
+    cur: list[str] = []
+    for line in text.splitlines():
+        if THREAD_START_RE.match(line) and sum(len(x) for x in cur) >= 20:
+            parts.append("\n".join(cur))
+            cur = [line]
+            continue
+        cur.append(line)
+    if cur:
+        parts.append("\n".join(cur))
+    merged: list[str] = []
+    for p in parts:                      # 헤더만 남은 조각은 다음 조각에 붙인다
+        if merged and len(re.sub(r"\s", "", p)) < 40:
+            merged[-1] = merged[-1] + "\n" + p
+        else:
+            merged.append(p)
+    return [p for p in merged if p.strip()]
+
+
+def compress_long_thread(text: str) -> str:
+    """왕복이 길면(기본 10통↑) 최초 2통·최근 4통만 원문, 중간은 1줄씩 남긴다(토큰 절감)."""
+    parts = [p for p in split_thread(text) if p.strip()]
+    if len(parts) < THREAD_COMPRESS_AT:
+        return "\n\n".join(reversed(parts)) if len(parts) > 1 else str(text or "").strip()
+    parts = list(reversed(parts))                     # 최초 → 최신
+    n = len(parts)
+    parts = [p.strip() for p in parts]
+    origin = parts[:THREAD_KEEP_ORIGIN]
+    recent = parts[n - THREAD_KEEP_RECENT:] if THREAD_KEEP_RECENT else []
+    middle = parts[THREAD_KEEP_ORIGIN: n - len(recent)]
+    lines = []
+    for p in middle:
+        head = next((ln for ln in p.splitlines()
+                     if ln.strip() and not THREAD_START_RE.match(ln)
+                     and not HEADER_ONLY_RE.match(ln)), "")
+        lines.append("… " + _clip(head, THREAD_LINE_CHARS))
+    block = "\n".join([f"[중간 {len(middle)}건 — 1줄 요약]"] + lines)
+    return "\n\n".join(origin + [block] + recent)
+
+
+def analysis_body(mail: dict) -> str:
+    """AI 분석 입력용 본문 — 이전 회신·전달 스레드를 자르지 않고 잡음만 걷어 낸다."""
+    raw = str(mail.get("bodyText") or "")
+    if not raw.strip():
+        return ""
+    text = squeeze_signatures(strip_slogan_lines(raw))
+    text = compress_long_thread(text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text[:ANALYSIS_BODY_CHARS]
+
+
+# ── 사내 조직 컨텍스트 ────────────────────────────────────────────
+def our_dept_label() -> str:
+    cfg = globals().get("CFG") or {}
+    label = str(cfg.get("our_dept") or "").strip()
+    if label:
+        return label
+    if OUR_DIVISION:
+        return OUR_DIVISION
+    return (OWNER.get("dept") or "").strip() or "우리 부서"
+
+
+def _dept_key(dept: str) -> str:
+    return re.sub(r"[\s\d]+", "", str(dept or ""))
+
+
+def is_our_team(dept: str) -> bool:
+    """`납입1팀`·`납입2팀` 처럼 숫자만 다른 같은 팀 계열인가."""
+    key = _dept_key(dept)
+    mine = _dept_key(OWNER.get("dept") or "")
+    return bool(key) and bool(mine) and key == mine
+
+
+def our_dept_tokens(contacts: dict | None = None) -> list[str]:
+    out: list[str] = []
+    for tok in (our_dept_label(), OWNER.get("dept") or ""):
+        tok = str(tok or "").strip()
+        if tok and tok not in out:
+            out.append(tok)
+    for c in (contacts or {}).values():
+        d = str(c.get("dept") or "").strip()
+        if d and is_our_team(d) and d not in out:
+            out.append(d)
+    return out
+
+
+def our_members(contacts: dict | None = None) -> list[dict]:
+    me = (OWNER.get("email") or ME or "").lower()
+    out: list[dict] = []
+    for email, c in (contacts or {}).items():
+        if not is_our_team(c.get("dept")):
+            continue
+        if str(email).lower() == me:
+            continue
+        out.append({"email": str(email), "name": (c.get("name") or "").strip(),
+                    "title": (c.get("title") or "").strip(), "dept": (c.get("dept") or "").strip()})
+    out.sort(key=lambda c: (c["dept"], c["name"]))
+    return out
+
+
+def person_label(raw: str, contacts: dict | None = None) -> str:
+    """주소 → `부서 이름 직급 (외부처)` 한 줄(부서 판별 근거)."""
+    email = _addr_email(raw)
+    info = (contacts or {}).get(email) or {}
+    name = (info.get("name") or "").strip() or _addr_name(raw) or email or str(raw)
+    title = (info.get("title") or "").strip()
+    dept = (info.get("dept") or "").strip()
+    if email.endswith("@gm.com"):
+        return f"{name} {title} (GM)".replace("  ", " ").strip()
+    if email.endswith(internal_domain()):
+        return (f"{dept} {name} {title}" if dept else f"{name} {title}").strip() or str(raw)
+    domain = email.split("@")[-1] if "@" in email else "외부"
+    return f"{name} {title} ({domain})".replace("  ", " ").strip()
+
+
+def org_context(mail: dict, contacts: dict | None = None) -> str:
+    """AI 프롬프트에 넣을 사내 조직 컨텍스트 — 우리 부서 인원과 이 메일의 To/CC 인원."""
+    contacts = contacts or {}
+    label = our_dept_label()
+    team = (OWNER.get("dept") or "").strip()
+    me = f"{OWNER.get('name') or ''} {OWNER.get('title') or ''}".strip() or "나"
+    lines = ["[사내 조직 컨텍스트]",
+             f"- 나: {me} · {label}" + (f" ({OWNER.get('email')})" if OWNER.get("email") else "")]
+    members = our_members(contacts)
+    if members:
+        shown = members[:14]
+        body = ", ".join(f"{m['name']} {m['title']}".strip() +
+                         (f"({m['dept']})" if m["dept"] and m["dept"] != team else "")
+                         for m in shown)
+        lines.append(f"- 우리 부서({label}) 인원 {len(members)}명: {body}" + (" 외" if len(members) > len(shown) else ""))
+    else:
+        lines.append(f"- 우리 부서({label}) 인원: 주소록 매핑 없음")
+    rows: list[str] = []
+    for kind, addrs in (("수신(To)", mail.get("to") or []), ("참조(CC)", mail.get("cc") or [])):
+        for raw in addrs:
+            email = _addr_email(raw)
+            if email and email == (OWNER.get("email") or ME or "").lower():
+                rows.append(f"  · {kind} 나({me}) — 우리 부서")
+                continue
+            rows.append(f"  · {kind} {person_label(raw, contacts)}")
+    lines.append("- 이 메일의 수신·참조 인원(주담당 부서 판별 근거):")
+    lines += rows[:18] or ["  · 없음"]
+    return "\n".join(lines)
+
+
+# ── 스레드 판별·캐시 ──────────────────────────────────────────────
+def short_when(when: str) -> str:
+    """`2026-11-24 07:00` → `11/24 07:00`"""
+    s = str(when or "")
+    m = re.search(r"(\d{2,4})-(\d{2})-(\d{2})[ T]?(\d{2}):(\d{2})", s)
+    if m:
+        return f"{int(m.group(2))}/{int(m.group(3))} {m.group(4)}:{m.group(5)}"
+    return s[:16]
+
+
+def timeline_line(mail: dict, contacts: dict | None, gist: str) -> str:
+    """`[11/24 07:00] GM 염주희 차장 → 납입1팀 : …` 한 줄."""
+    when = short_when(mail.get("date") or mail.get("receivedAt") or "")
+    who = _sender_phrase(mail, contacts) or (mail.get("from_raw") or "발신자")
+    rcpt = _recipient_phrase(mail, contacts, _is_to(mail))
+    rcpt = re.sub(r"(?:에게|께|한테)$", "", rcpt or "").strip()      # "[날짜] A → B : …" 형태로 읽히게
+    return f"[{when}] {who} → {rcpt or '-'} : {_clip(gist, 80)}"
+
+
+def guess_category(title: str, body: str) -> str:
+    blob = f"{title or ''} {body or ''}".lower()
+    for key, cat in (("출하리스트", "출하/보급"), ("납입요청", "납입요청"), ("재고", "재고/실사"),
+                     ("ptr", "PTR"), ("용기", "승인/검토"), ("승인", "승인/검토"), ("결품", "결품/보고")):
+        if key in blob:
+            return cat
+    return "기타"
+
+
+def prefilter(mail: dict, contacts: dict | None = None) -> dict:
+    """AI 를 부르기 전에 classify() 규칙으로 등급을 미리 본다(본문·제목·수신 위치만 사용)."""
+    item = {
+        "title": mail.get("subject") or mail.get("title") or "",
+        "bodyText": mail.get("bodyText") or "",
+        "sender": sender_label(mail.get("from_raw") or mail.get("sender") or "",
+                               mail.get("from_email") or mail.get("senderEmail") or "", contacts or {}),
+        "senderEmail": mail.get("from_email") or mail.get("senderEmail") or "",
+        "recipientRole": "To" if _is_to(mail) else "CC",
+        "category": guess_category(mail.get("subject") or mail.get("title"),
+                                   clean_body(mail.get("bodyText") or "")),
+    }
+    classify(item)
+    return item
+
+
+def text_mentions_us(mail: dict) -> bool:
+    """제목·본문(스레드 전체)에 우리 부서/내 이름이 직접 나오는가."""
+    text = f"{mail.get('subject') or mail.get('title') or ''}\n{mail.get('bodyText') or ''}"
+    if MENTION_RE.search(text):
+        return True
+    return any(tok and tok in text for tok in our_dept_tokens())
+
+
+def to_includes_us(mail: dict, contacts: dict | None = None) -> bool:
+    me = (OWNER.get("email") or ME or "").lower()
+    for raw in mail.get("to") or []:
+        email = _addr_email(raw)
+        if email and email == me:
+            return True
+        if is_our_team(((contacts or {}).get(email) or {}).get("dept")):
+            return True
+    return False
+
+
+def thread_cache_key(title: str) -> str:
+    key = _norm_title(title or "")
+    return key or str(title or "").strip().lower()
+
+
+def thread_cache_get(store, mail: dict) -> dict | None:
+    if not isinstance(store, dict):
+        return None
+    rec = store.get(thread_cache_key(mail.get("subject") or mail.get("title") or ""))
+    return rec if isinstance(rec, dict) and rec.get("timeline") else None
+
+
+def thread_cache_put(store, mail: dict, analysis: dict, *, used_cache: bool = False) -> dict | None:
+    """이 스레드의 누적 타임라인·결론을 남긴다 — 다음 회신은 이 줄만 보고 이어 붙인다."""
+    if not isinstance(store, dict) or not isinstance(analysis, dict):
+        return None
+    key = thread_cache_key(mail.get("subject") or mail.get("title") or "")
+    if not key:
+        return None
+    rec = dict(store.get(key) or {})
+    timeline = [str(x).strip() for x in (analysis.get("timeline") or []) if str(x).strip()]
+    if not timeline:                       # 모델이 타임라인을 비웠으면 캐시 줄 + 이번 메일 1줄로 보완
+        timeline = list(rec.get("timeline") or [])
+        line = timeline_line(mail, None, analysis.get("headline") or analysis.get("threadGist") or "")
+        if line and not any(line.split(" : ")[0] in t for t in timeline):
+            timeline.append(line)
+    rec.update({"timeline": timeline[-CACHE_TIMELINE_MAX:],
+                "count": len(timeline),
+                "mainDept": analysis.get("mainDept") or rec.get("mainDept") or "",
+                "deptBasis": analysis.get("deptBasis") or rec.get("deptBasis") or "",
+                "ourDeptAction": analysis.get("ourDeptAction") or rec.get("ourDeptAction") or "",
+                "myAction": analysis.get("myAction") or rec.get("myAction") or "",
+                "headline": analysis.get("headline") or rec.get("headline") or "",
+                "summary": analysis.get("summary") or rec.get("summary") or "",
+                "usedCache": bool(used_cache),
+                "updatedAt": kst_now().strftime("%Y-%m-%d %H:%M")})
+    store[key] = rec
+    if len(store) > THREAD_CACHE_MAX:            # 오래된 스레드부터 버린다(데이터 크기 보호)
+        old = sorted(store.items(), key=lambda kv: str((kv[1] or {}).get("updatedAt") or ""))
+        for k, _v in old[: len(store) - THREAD_CACHE_MAX]:
+            store.pop(k, None)
+    return rec
+
+
+# ── 3단 조립 · 건너뛰기 ──────────────────────────────────────────
+def compose_analysis(timeline, main_dept: str = "", dept_basis: str = "",
+                     our_action: str = "", my_action: str = "") -> str:
+    """AI 가 준 재료를 화면용 3단 텍스트로 고정 조립한다(형식이 흔들리지 않게)."""
+    label = our_dept_label()
+    who = f"{OWNER.get('name') or ''} {OWNER.get('title') or ''}".strip() or "나"
+    lines = ["1) 🔄 업무 진행 경과 (최초 → 최신)"]
+    tl = [str(t).strip() for t in (timeline or []) if str(t).strip()]
+    lines += ["- " + t for t in tl] or ["- (본문 1통 — 이전 회신 없음)"]
+    lines += ["", "2) 🎯 요청 대상 및 주담당 부서 판별",
+              f"- 주담당: {main_dept or '확인 필요'}",
+              "- 판단 근거: " + (dept_basis or "수신(To)·참조(CC) 위치, 본문 지목, 이전 회신자 서명 기준"),
+              "", "3) ✅ 결론: 내가 할 일 / 우리 부서 할 일",
+              f"- 우리 부서({label}): {our_action or '[확인 필요]'}",
+              f"- 나({who}): {my_action or '[확인 필요]'}"]
+    return "\n".join(lines)
+
+
+def is_detailed_summary(text: str) -> bool:
+    s = str(text or "")
+    return all(k in s for k in ("🔄", "🎯", "✅"))
+
+
+def skip_analysis(mail: dict, reason: str = "simple_share") -> dict:
+    """⚪ 단순 공유 — AI 를 전혀 부르지 않는다(Zero-Token). 나중에 화면에서 다시 부를 수 있게 입력만 남긴다."""
+    body = clean_body(mail.get("bodyText") or "")
+    title = mail.get("subject") or mail.get("title") or ""
+    ref = mail.get("date") or mail.get("receivedAt") or ""
+    due = deadline_date(f"{title}\n{body}", ref)
+    gist, _verb = _gist_clause(body, title, ref)
+    head = _clip(gist or title, 60)
+    return {
+        "summary": SKIP_SIMPLE_SUMMARY,
+        "headline": head,
+        "actionItems": [],
+        "dueDate": due,
+        "deadline": (deadline_label(due) if due else "별도 회신 기한 없음"),
+        "replyStatus": "no_reply_needed",
+        "category": guess_category(title, body),
+        "urgency": "normal",
+        "threadGist": head,
+        "tags": [],
+        "replyDrafts": {},
+        "aiSkipped": True,
+        "aiSkipReason": reason,
+        "mainDept": "확인 필요(단순 공유)",
+        "deptBasis": "출하리스트·납입요청 등 현장 일상 공유로 분류(수신·참조 위치만)",
+        "ourDeptAction": "[없음 (단순 공유 · 참고만)]",
+        "myAction": "[할 일 없음(확인 처리 권장)]",
+        "timeline": [timeline_line(mail, None, head)],
+        "analysisBody": analysis_body(mail)[:4000],
+    }
+
+
+def light_analysis(mail: dict, contacts: dict | None = None) -> dict:
+    """타 부서 주담당 참조(CC) 메일 — 무거운 스레드 분석 대신 한 줄 경량 요약."""
+    body = clean_body(mail.get("bodyText") or "")
+    title = mail.get("subject") or mail.get("title") or ""
+    ref = mail.get("date") or mail.get("receivedAt") or ""
+    due = deadline_date(f"{title}\n{body}", ref)
+    gist, _verb = _gist_clause(body, title, ref)
+    head = _clip(gist or title, 60)
+    who = _sender_phrase(mail, contacts) or (mail.get("from_raw") or "발신자")
+    rcpt = _recipient_phrase(mail, contacts, _is_to(mail))
+    summary = f"{LIGHT_TAG} {who} → {rcpt}" + (f" : {head}" if head else "")
+    return {
+        "summary": summary,
+        "headline": head,
+        "actionItems": [],
+        "dueDate": due,
+        "deadline": (deadline_label(due) if due else "별도 회신 기한 없음"),
+        "replyStatus": "no_reply_needed",
+        "category": guess_category(title, body),
+        "urgency": "normal",
+        "threadGist": head,
+        "tags": [],
+        "replyDrafts": {},
+        "aiSkipped": True,
+        "aiSkipReason": "other_dept",
+        "mainDept": "타 부서(주담당) · 우리 부서는 참조",
+        "deptBasis": f"우리 부서({our_dept_label()})가 수신(To)에 없고 본문 지목도 없음",
+        "ourDeptAction": "[없음 (타 부서 주담당 · 단순 참조)]",
+        "myAction": "[할 일 없음(확인 처리 권장)]",
+        "timeline": [timeline_line(mail, contacts, head)],
+        "analysisBody": analysis_body(mail)[:4000],
+    }
+
+
+# ── AI 입력 조립 (네트워크 없음 — 테스트가 이 문자열을 직접 검사한다) ──────────
+def analysis_input_text(mail: dict, kind: str = "받은편지함", *, contacts: dict | None = None,
+                        cache: dict | None = None, brief: bool = False) -> str:
+    lines = [
+        f"[편지함] {kind}",
+        f"[보낸날짜] {mail.get('date') or mail.get('receivedAt') or ''}",
+        f"[보낸사람] {mail.get('from_raw') or mail.get('sender_raw') or mail.get('sender') or ''}",
+        f"[받는사람] {', '.join(mail.get('to') or []) or '-'}",
+        f"[참조] {', '.join(mail.get('cc') or []) or '-'}",
+        f"[제목] {mail.get('subject') or mail.get('title') or ''}",
+    ]
+    if mail.get("attachments"):
+        lines.append("[첨부] " + ", ".join(f"{a.get('name')}({a.get('size')})" for a in mail["attachments"]))
+    lines += ["", org_context(mail, contacts)]
+    body = analysis_body(mail)
+    if cache and cache.get("timeline"):
+        lines += ["", "[기존 누적 타임라인] — 이미 분석한 이 스레드의 시간순 경과(줄은 그대로 두고 끝에 이어 붙인다)"]
+        lines += [f"- {t}" for t in cache["timeline"]]
+        if cache.get("mainDept") or cache.get("ourDeptAction"):
+            lines.append(f"[지난 결론] 주담당 {cache.get('mainDept') or '-'} / "
+                         f"우리 부서 {cache.get('ourDeptAction') or '-'} / 나 {cache.get('myAction') or '-'}")
+        lines += ["[이번 요청] 아래 '새로 추가된 메일 1통'만 읽어 위 타임라인 끝에 이어 붙이고, "
+                  "3단 결론(주담당·우리 부서 할 일·내 할 일)을 최신 기준으로 갱신한다.",
+                  "", "[새로 추가된 메일 1통]", body]
+    else:
+        lines += ["", "[본문 — 최초 → 최신 순 (이전 회신·전달 포함)]", body]
+    if brief:
+        lines.append("\n[이번 요청] 위 메일은 과거 기록 보강용이다. timeline 은 1~2줄, "
+                     "ourDeptAction·myAction 은 한 줄로 짧게 쓰고, actionItems 는 빈 배열, replyDrafts 는 생략한다.")
+    return "\n".join(lines)
+
+
+def normalize_analysis(result: dict, mail: dict, cache: dict | None = None) -> dict:
+    """AI 응답을 화면 형식으로 정리한다 — 3단 고정 조립, 타임라인 보존, 빠진 필드 보완."""
+    out = dict(result or {})
+    timeline = [str(x).strip() for x in (out.get("timeline") or []) if str(x).strip()]
+    if cache and cache.get("timeline"):
+        old = [str(t) for t in cache["timeline"] if str(t).strip()]
+        if not timeline or len(timeline) < len(old):
+            timeline = old + [t for t in timeline if t not in old]
+    fields = (out.get("mainDept") or "", out.get("deptBasis") or "",
+              out.get("ourDeptAction") or "", out.get("myAction") or "")
+    summary = str(out.get("summary") or "").strip()
+    if timeline or any(fields):
+        composed = compose_analysis(timeline, *fields)
+        if not is_detailed_summary(summary):
+            summary = composed
+    out["summary"] = summary
+    if timeline:
+        out["timeline"] = timeline[-CACHE_TIMELINE_MAX:]
+    if not out.get("headline"):
+        out["headline"] = _clip(out.get("threadGist") or (timeline[0] if timeline else "")
+                                or (mail.get("subject") or ""), 60)
+    if out.get("replyDrafts") is None:
+        out["replyDrafts"] = {}
+    return out
+
+
+def _run_ai(gem, mail: dict, kind: str, contacts: dict | None, cache: dict | None,
+            stats: dict | None, brief: bool) -> dict:
+    if gem is not None:
+        try:
+            if isinstance(stats, dict):
+                stats["gemini_calls"] = int(stats.get("gemini_calls") or 0) + 1
+            res = gem.analyze(mail, kind=kind, contacts=contacts, cache=cache, brief=brief)
+            return normalize_analysis(res, mail, cache)
+        except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
+            # 로그가 공개될 수 있으므로 메일 제목·본문은 오류 문구에 넣지 않는다
+            msg = f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}: {str(e)[:160]}"
+            if isinstance(stats, dict):
+                stats.setdefault("warnings", []).append(msg)
+            print(f"  ! {msg}", file=sys.stderr)
+    return normalize_analysis(heuristic_analysis(mail, _is_to(mail), contacts, cache=cache), mail, cache)
+
+
+def analyze_mail(gem, mail: dict, kind: str = "받은편지함", contacts: dict | None = None,
+                 *, thread_cache: dict | None = None, stats: dict | None = None,
+                 brief: bool = False, force_deep: bool = False) -> dict:
+    """메일 1통 분석 — ① 단순 공유는 AI 생략 ② 타 부서 참조는 경량 ③ 나머지는 3단 정밀 분석.
+
+    정밀 분석은 스레드 캐시가 있으면 '누적 타임라인 + 새 메일 1통'만 보낸다(증분).
+    """
+    contacts = contacts or {}
+    inbox = str(kind or "").startswith("받은")
+    if inbox and not brief and not force_deep:
+        priority = int(prefilter(mail, contacts).get("priority") or 2)
+        mentioned = text_mentions_us(mail)
+        if priority == 3 and not mentioned:
+            return skip_analysis(mail, "simple_share")
+        if not mentioned and not to_includes_us(mail, contacts):
+            return light_analysis(mail, contacts)
+    cache = thread_cache_get(thread_cache, mail)
+    res = _run_ai(gem, mail, kind, contacts, cache, stats, brief)
+    if inbox and not brief:
+        thread_cache_put(thread_cache, mail, res, used_cache=bool(cache))
+    return res
+
+
 def mentions_me(text: str) -> bool:
     return bool(MENTION_RE.search(strip_quoted(text or "")))
 
@@ -1651,6 +2203,13 @@ class GeminiError(RuntimeError):
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
+        # 3단 분석 재료 (v1.2.11) — 화면은 이 값들로 1) 진행 경과 / 2) 주담당 / 3) 결론을 조립한다
+        "timeline": {"type": "array", "items": {"type": "string"}},
+        "mainDept": {"type": "string"},
+        "deptBasis": {"type": "string"},
+        "ourDeptAction": {"type": "string"},
+        "myAction": {"type": "string"},
+        "headline": {"type": "string"},
         "summary": {"type": "string"},
         "actionItems": {"type": "array", "items": {"type": "string"}},
         "dueDate": {"type": "string", "nullable": True},
@@ -1669,7 +2228,8 @@ ANALYSIS_SCHEMA = {
             },
         },
     },
-    "required": ["summary", "actionItems", "replyStatus", "category", "urgency", "threadGist"],
+    "required": ["timeline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
+                 "summary", "actionItems", "replyStatus", "category", "urgency", "threadGist"],
 }
 
 SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성규 과장의 업무 비서다.
@@ -1679,19 +2239,45 @@ SYSTEM_PROMPT = """당신은 천일정기화물자동차(주) 납입1팀 김성�
 - 자재 납입·출하·재고 승인, GM(고객사) 대응, 결품/PTR/EOP/용기승인, 협력사 보급 지시.
 - 해외물류부 영역(항공/해상 B/L, 선적 부킹, 포워더, 통관, 선복)은 담당이 아니므로 actionItems 에서 제외한다.
 
-[summary 작성 규칙]
+[이 분석의 목적 — 3단 고정]
+GM 처럼 여러 부서를 수신(To)/참조(CC)에 한꺼번에 넣어 보내는 메일에서
+① 업무가 어떻게 흘러왔는지 ② 실제로 요청받은 주담당 부서가 어디인지
+③ 납입관리부(우리 팀)와 김성규 과장이 무엇을 해야 하는지를 분명히 가려낸다.
+수신/참조 위치, 본문 지목, 이전 회신자의 서명·각인, 업무 성격을 함께 보고 판단한다.
+화면에는 이 분석이 아래 3단으로 표시된다 — 너는 각 단에 들어갈 재료를 정확히 채운다.
+  1) 🔄 업무 진행 경과   → timeline
+  2) 🎯 요청 대상 및 주담당 부서 판별 → mainDept · deptBasis
+  3) ✅ 결론: 우리 부서 할 일 / 내 할 일 → ourDeptAction · myAction
+
+[timeline — 1) 업무 진행 경과]
+- 최초 발신부터 최신 메일까지 시간순으로 한 줄에 하나씩 `[날짜/시간] 발신자 → 수신자 : 핵심 내용` 형태로 쓴다.
+  예) "[11/20 09:12] GM 염주희 차장 → 납입·해외물류부 : MY26 EOP 자재 입항지연으로 11/24 07:00 기준 재고파악 요청"
+- 일정·품번·수량·조건이 바뀌었으면 그 줄에 바뀐 사실을 적는다(예: "기한 11/24 → 11/25 변경").
+- `[기존 누적 타임라인]` 이 함께 오면 **그 줄들은 지우거나 고치지 말고 그대로 두고**, 새로 온 메일 1통만
+  끝에 이어 붙여 전체 타임라인을 다시 낸다. 20줄을 넘으면 중간을 "… (중간 N건 생략)" 한 줄로 줄여 18줄 이내로.
 - **본문 첫 줄이나 인사말을 그대로 옮기지 않는다.** "○○님," · "요청드립니다" · "안녕하십니까" 같은 문장이
-  summary 에 남아 있으면 잘못 쓴 것이다. (예: 본문이 "피세영 대리님, 하기 품번 명일 07:00 기준 재고실사
-  요청드립니다"인데 summary 도 같은 문장이면 실패)
-- **반드시 제3자 보고체 1~2문장으로 쓴다**: 누가(소속·이름·직급) → 누구에게 → 무슨 사유/품번으로 →
-  언제까지 무엇을 요청·공유·제출하는지.
-  예) "GM 염주희 차장이 납입·해외물류부에 MY26 EOP 자재 입항지연으로 11/24 07:00 기준 재고파악을 요청한 건"
-  예) "사내 해외물류부 류광종 과장이 납입1팀에 11/24 07:00 기준 2품번(13524683·13540045) 재고실사 자료
-  회신을 요청한 건"
-- 소속 표기: 보낸 사람 주소가 @gm.com 이면 "GM", @chunil.co.kr 이면 "사내"(서명·본문에 부서가 있으면
-  "해외물류부" 처럼 그 부서). 받는 사람은 [받는사람] 의 첫 사람·팀을 "누구에게"로 쓴다.
-- 그 뒤에 필요한 사실(품번·수량·기한·진행 상태·남은 일)만 덧붙인다. "이슈 → 진행 → 남은 일"은
-  필요할 때 2번째 문장부터 쓴다.
+  타임라인에 그대로 남아 있으면 잘못 쓴 것이다.
+- 누가(소속·이름·직급) → 누구에게 → 무슨 사유/품번으로 → 언제까지 무엇을, 의 **제3자 보고체**로 쓴다.
+  예) "사내 해외물류부 류광종 과장이 납입1팀에 11/24 07:00 기준 2품번(13524683·13540045) 재고실사 자료 회신을 요청"
+- 소속 표기: 보낸 사람 주소가 @gm.com 이면 "GM", 사내면 서명·조직도에 나온 부서명("해외물류부" 등)을 쓴다.
+
+[mainDept / deptBasis — 2) 주담당 부서 판별]
+- mainDept: 실제 요청을 받은 부서(또는 사람). 예) "해외물류부(선적·통관)", "조달물류팀", "납입관리부(납입1팀)", "협력사 OO".
+- deptBasis: 그 판단 근거 1줄 — 수신(To) vs 참조(CC) 위치, 본문에서 지목한 이름/부서, 이전 회신자 서명·각인, 업무 성격.
+- [사내 조직 컨텍스트] 의 부서 매핑을 적극적으로 쓴다. "나"가 속한 부서가 우리 부서다.
+
+[ourDeptAction / myAction — 3) 결론]
+- ourDeptAction: `[직접 조치/회신 필요] …` 또는 `[없음 (타 부서 주담당 · 단순 참조)]` 중 하나로 결론짓고,
+  할 일이 있으면 구체적인 액션과 기한을 적는다.
+- myAction: `[직접 회신 필요] …` / `[팀원(이름) 처리 팔로업] …` / `[할 일 없음(확인 처리 권장)]` 중 하나로 쓴다.
+  본문 지목 여부와 관리자 검토 필요 여부로 판단한다.
+
+[headline]
+- 목록·검색에 쓰는 한 줄(60자 이내). "누가 → 무엇을 요청" 형태. 3단 요약을 다시 쓰지 않는다.
+
+[summary]
+- 위 재료를 3단 그대로 옮긴 텍스트. timeline·mainDept·deptBasis·ourDeptAction·myAction 을 채우면
+  화면이 같은 형식으로 다시 조립하므로, 재료를 정확히 채우는 것이 우선이다.
 - 수신인·참조 설명("수신 A·B(To)", "김성규 과장은 참조", "내 조치 없음")은 쓰지 않는다. 수신 정보는 별도 필드로 저장된다.
 - 날짜·품번·수량·기한 같은 사실은 원문 그대로 옮긴다. 추측은 "확인 필요"로 표시한다.
 - 본문이 리스트·표 위주면 무엇이 몇 건인지, 회신이 필요한지만 한 줄로 압축한다.
@@ -1784,25 +2370,14 @@ class Gemini:
             time.sleep(min(2 ** attempt, 20))
         raise GeminiError(f"Gemini 요청 실패: {last}")
 
-    def analyze(self, mail: dict, *, kind: str = "받은편지함", brief: bool = False) -> dict:
-        body = (mail.get("bodyText") or "")[:7000]
-        lines = [
-            f"[편지함] {kind}",
-            f"[보낸날짜] {mail.get('date') or mail.get('receivedAt')}",
-            f"[보낸사람] {mail.get('from_raw') or mail.get('sender_raw')}",
-            f"[받는사람] {', '.join(mail.get('to') or []) or '-'}",
-            f"[참조] {', '.join(mail.get('cc') or []) or '-'}",
-            f"[제목] {mail.get('subject')}",
-        ]
-        if mail.get("attachments"):
-            lines.append("[첨부] " + ", ".join(f"{a['name']} ({a['size']})" for a in mail["attachments"]))
-        lines.append("\n[본문]\n" + clean_body(body))
-        if brief:
-            lines.append("\n[이번 요청] 위 메일은 과거 기록 보강용이다. summary 는 1~2줄(200자 이내)로 "
-                         "핵심만 쓰고, actionItems 는 빈 배열, replyDrafts 는 생략한다.")
+    def analyze(self, mail: dict, *, kind: str = "받은편지함", brief: bool = False,
+                contacts: dict | None = None, cache: dict | None = None) -> dict:
+        #  v1.2.11 — 이전 회신을 자르지 않은 전체 스레드 + 사내 조직 컨텍스트.
+        #  스레드 캐시(cache)가 있으면 '누적 타임라인 + 새 메일 1통'만 보낸다(증분 분석).
+        text = analysis_input_text(mail, kind, contacts=contacts, cache=cache, brief=brief)
         payload = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"role": "user", "parts": [{"text": "\n".join(lines)}]}],
+            "contents": [{"role": "user", "parts": [{"text": text}]}],
             "generationConfig": {
                 "temperature": 0.2,
                 "responseMimeType": "application/json",
@@ -2377,22 +2952,44 @@ def refresh_reply_drafts(items: list[dict]) -> int:
     return n
 
 
-def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None) -> dict:
+def heuristic_analysis(mail: dict, to_me: bool, contacts: dict | None = None,
+                       *, cache: dict | None = None) -> dict:
+    """AI 없이(또는 실패 시) 만드는 3단 분석 — AI 와 같은 형식(진행 경과·주담당·결론)으로 채운다."""
     body = clean_body(mail.get("bodyText") or "")
     core = strip_greeting(body) or body          # 인사말·소속 소개는 요약에서 뺀다
     first = _clean(core)[:280]
-    title = mail.get("subject") or ""
+    title = mail.get("subject") or mail.get("title") or ""
+    ref = mail.get("date") or mail.get("receivedAt") or ""
     # 본문에 `제출 기한 : 12월 2일` 처럼 적힌 기한은 AI 없이도 그대로 읽어 dueDate 를 채운다
-    due = deadline_date(title + "\n" + body, mail.get("date") or mail.get("receivedAt") or "")
-    cat = "기타"
-    for key, c in (("출하리스트", "출하/보급"), ("납입요청", "납입요청"), ("재고", "재고/실사"),
-                   ("PTR", "PTR"), ("용기", "승인/검토"), ("승인", "승인/검토"), ("결품", "결품/보고")):
-        if key.lower() in (title + body).lower():
-            cat = c
-            break
-    summary, gist = third_person_summary(mail, contacts, to_me)
+    due = deadline_date(f"{title}\n{body}", ref)
+    cat = guess_category(title, body)
+    _line, gist = third_person_summary(mail, contacts, to_me)
+    timeline = [str(t) for t in ((cache or {}).get("timeline") or []) if str(t).strip()]
+    if not timeline:
+        line_gist = gist or title
+        reason = _reason_clause(body)          # `(MY26 EOP 자재로 입항지연 예상 )` 같은 사유도 함께
+        if reason and reason not in line_gist:
+            line_gist = f"{line_gist} ({reason})"
+        timeline = [timeline_line(mail, contacts, line_gist)]
+    mentioned = text_mentions_us(mail)
+    label = our_dept_label()
+    ours = to_me or to_includes_us(mail, contacts) or mentioned
+    main_dept = label if ours else "확인 필요(타 부서 가능)"
+    basis = ("우리 부서(팀)가 수신(To)" if to_me
+             else "본문·제목에서 우리 부서/이름 지목" if mentioned
+             else "우리 부서(팀)가 수신(To)에 포함" if ours
+             else "수신(To)·참조(CC) 위치만으로는 판별 어려움 — 원문 확인 권장")
+    our_action = ("[직접 회신 필요] 본문 요청 내용 확인 후 회신" if (to_me or ours)
+                  else "[없음 (타 부서 주담당 · 단순 참조)]")
+    my_action = "[직접 회신 필요] 본문 요청 확인" if to_me else "[할 일 없음(확인 처리 권장)]"
     return {
-        "summary": summary or first or title,
+        "summary": compose_analysis(timeline, main_dept, basis, our_action, my_action),
+        "headline": _clip(gist or first or title, 60),
+        "mainDept": main_dept,
+        "deptBasis": basis,
+        "ourDeptAction": our_action,
+        "myAction": my_action,
+        "timeline": timeline,
         "actionItems": [],
         "dueDate": due,
         "deadline": (deadline_label(due) if due
@@ -2467,6 +3064,15 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
         item["attachments"] = mail["attachments"]
     if analysis.get("tags"):
         item["tags"] = analysis["tags"]
+    # 3단 분석 재료·AI 생략 표시 (v1.2.11)
+    for key in ("headline", "mainDept", "deptBasis", "ourDeptAction", "myAction", "aiSkipReason"):
+        if analysis.get(key):
+            item[key] = analysis[key]
+    if analysis.get("aiSkipped"):
+        item["aiSkipped"] = True
+        item["replyDrafts"] = {}
+    if analysis.get("analysisBody"):
+        item["analysisBody"] = str(analysis["analysisBody"])[:4000]
     body = clean_body(mail.get("bodyText") or "")
     if body:
         item["bodyText"] = body[:2500]
@@ -2523,7 +3129,20 @@ def merge_into_thread(item: dict, new_item: dict) -> None:
         item["replyStatus"] = "needs_reply"
         if new_item.get("replyDrafts"):
             item["replyDrafts"] = new_item["replyDrafts"]
-    item["summary"] = new_item["summary"] or item.get("summary", "")
+    # 3단 정밀 분석이 경량/생략 요약으로 덮이지 않게 한다(v1.2.11)
+    new_sum, old_sum = new_item.get("summary") or "", item.get("summary") or ""
+    if new_sum and (is_detailed_summary(new_sum) or not is_detailed_summary(old_sum)):
+        item["summary"] = new_sum
+    for key in ("headline", "mainDept", "deptBasis", "ourDeptAction", "myAction"):
+        if new_item.get(key):
+            item[key] = new_item[key]
+    if is_detailed_summary(item.get("summary")) and not new_item.get("aiSkipped"):
+        item.pop("aiSkipped", None)
+        item.pop("aiSkipReason", None)
+    elif new_item.get("aiSkipped"):
+        # 이번 회신이 단순 공유/타 부서 참조로 건너뛴 것이면 그 표시도 함께 옮긴다(화면의 [✨ AI 요약] 버튼)
+        item["aiSkipped"] = True
+        item["aiSkipReason"] = new_item.get("aiSkipReason") or "simple_share"
     if new_item.get("actionItems"):
         item["actionItems"] = new_item["actionItems"]
     if new_item.get("attachments"):
@@ -2637,16 +3256,11 @@ def sync(args: argparse.Namespace) -> dict:
 
     gem = Gemini(args.gemini_key, args.gemini_model) if args.gemini_key else None
 
+    thread_cache = data.setdefault("thread_cache", {})
+
     def analyze(mail: dict, kind: str) -> dict:
-        if gem is None:
-            return heuristic_analysis(mail, _is_to(mail), contacts)
-        try:
-            report["gemini_calls"] += 1
-            return gem.analyze(mail, kind=kind)
-        except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
-            # 로그가 공개될 수 있으므로 메일 제목·본문은 오류 문구에 넣지 않는다
-            report["warnings"].append(f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}: {str(e)[:200]}")
-            return heuristic_analysis(mail, _is_to(mail), contacts)
+        # v1.2.11 — 단순 공유는 AI 생략, 타 부서 참조는 경량, 나머지는 3단 정밀 분석(스레드 증분)
+        return analyze_mail(gem, mail, kind, contacts, thread_cache=thread_cache, stats=report)
 
     added = 0
     title_sent: list[str] = []
