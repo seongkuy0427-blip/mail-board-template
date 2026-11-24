@@ -3775,7 +3775,16 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       ? (e.c.title + " " + (e.c.memo || "")).toLowerCase().indexOf(ql) >= 0
       : matches(e.it));
     const nM = rows.filter((e) => e.type === "mail").length, nC = rows.length - nM;
-    const c = all.counts, cs = [];
+    /* 요약 숫자는 '지금 보이는 줄' 기준 — 검색어나 '회신 필요만 보기'로 걸러지면 그만큼 줄어 보이게 */
+    const c = { late: 0, today: 0, soon: 0, reply: 0, cal: 0 };
+    rows.forEach((e) => {
+      if (e.type === "cus") c.cal++;
+      else if (e.day === null) c.reply++;
+      else if (e.day < 0) c.late++;
+      else if (e.day === 0) c.today++;
+      else c.soon++;
+    });
+    const cs = [];
     if (c.late) cs.push("지연 " + c.late);
     if (c.today) cs.push("오늘 " + c.today);
     if (c.soon) cs.push("D-3 이내 " + c.soon);
