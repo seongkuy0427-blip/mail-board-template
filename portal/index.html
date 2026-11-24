@@ -2010,7 +2010,9 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     hideAlertBanner();   /* 잠금 화면에 메일 제목이 남지 않게 알림 카드·탭 깜빡임을 끈다 */
     $("app").hidden = true; $("gate").hidden = false; $("pin").value = ""; $("gateErr").textContent = "";
     $("remember").checked = false;
-    (gateRememberId() || $("loginId").value ? $("pin") : $("loginId")).focus();
+    const savedId = gateRememberId();     /* 자동 로그인으로 들어왔던 경우에도 로그아웃 뒤 아이디를 채워 둔다 */
+    if (savedId && $("loginId") && !$("loginId").value) $("loginId").value = savedId;
+    (savedId || $("loginId").value ? $("pin") : $("loginId")).focus();
   }
 
   /* ---------------- 🔒 화면 잠금 (v1.2.16) ----------------
