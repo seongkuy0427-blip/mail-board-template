@@ -58,6 +58,18 @@
     background:
       radial-gradient(78% 30% at 50% 26%, rgba(2,7,18,.50) 0%, rgba(2,7,18,.26) 58%, rgba(2,7,18,0) 100%),
       linear-gradient(180deg, rgba(3,8,20,.52) 0%, rgba(3,8,20,.34) 22%, rgba(3,8,20,.12) 40%, rgba(3,8,20,0) 56%)}
+  /* 🌃 일출 ↔ 야경 크로스페이드 (#9863) — 사진 두 장을 겹쳐 두고 10분마다 2.2초 동안 스르륵 바꾼다.
+     글씨(.lb-txt·.lb-foot)는 겹친 사진 위에 그대로 두어, 전환 중에도 위치·크기가 흔들리지 않는다. */
+  .left-banner .lb-layer{position:absolute; inset:0; opacity:1;
+    transition:opacity 2.2s ease-in-out; will-change:opacity}
+  .left-banner .lb-night{opacity:0}
+  .left-banner.is-night .lb-day{opacity:0}
+  .left-banner.is-night .lb-night{opacity:1}
+  .left-banner .lb-img-night{position:absolute; inset:0;
+    background:url("assets/left-banner-night.jpg?v=n1") center bottom / cover no-repeat}
+  /* 움직임 줄이기 설정 — 전환은 하되 흐림 없이 즉시 바꾼다 */
+  @media (prefers-reduced-motion: reduce){ .left-banner .lb-layer{transition:none} }
+
   /* 상단 11% 지점에 가로 타이틀 블록 — 위 여백을 줄여 하늘 꼭대기에 당당하게 */
   .left-banner .lb-txt{position:absolute; top:11%; left:10px; right:10px; text-align:center}
   .left-banner .lb-head{display:flex; align-items:baseline; justify-content:center; gap:6px; line-height:1; white-space:nowrap}
@@ -1570,8 +1582,8 @@
 <div id="app" hidden>
   <!-- ============ 🎨 왼쪽 여백 감성 배너 (와이드 PC 전용 · 장식) ============ -->
   <aside class="left-banner" aria-hidden="true">
-    <span class="lb-img"></span>
-    <span class="lb-veil"></span>
+    <span class="lb-layer lb-day"><span class="lb-img"></span><span class="lb-veil"></span></span>
+    <span class="lb-layer lb-night"><span class="lb-img-night"></span></span>
     <span class="lb-txt">
       <span class="lb-head"><span class="lb-the">The Next</span><span class="lb-num">100</span></span>
       <span class="lb-div"></span>
@@ -1612,7 +1624,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.23</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.24</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1843,11 +1855,20 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.23").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.24").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
     b.textContent = "v" + APP_VER;
+  /* 🌃 왼쪽 사옥 배너 — 일출 ↔ 야경 10분 주기 전환 (#9863 확정: 10분).
+     두 사진을 CSS 로 겹쳐 두고 10분(600,000ms)마다 .is-night 를 토글한다(2.2초 크로스페이드).
+     팝업·알림 없음, 토큰 소비 0. 새로고침하면 다시 일출부터 시작한다. */
+  const BANNER_SWAP_MS = 10 * 60 * 1000;
+  (function bannerCycle() {
+    const box = document.querySelector(".left-banner");
+    if (!box) return;
+    setInterval(() => box.classList.toggle("is-night"), BANNER_SWAP_MS);
+  })();
     b.title = "현재 화면 버전 v" + APP_VER + (window.__PORTAL_MODE__ ? " · 사내 포털 서버" : " · GitHub Pages");
   })();
   /* 포털 서버 모드 여부 — server.py 가 window.__PORTAL_MODE__ = true 를 먼저 넣어 준다.

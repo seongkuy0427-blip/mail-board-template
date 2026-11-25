@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.23"
+VERSION = "1.2.24"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -93,7 +93,8 @@ SECURITY_HEADERS = {
 UPDATE_URL_DEFAULT = ("https://raw.githubusercontent.com/seongkuy0427-blip/"
                       "mail-board-template/main/portal")
 UPDATE_INTERVAL_SEC = 300              # 확인 주기(초)
-UPDATE_FILES = ("index.html", "server.py", "scripts/sync_mail.py", "scripts/backfill_archive.py")
+UPDATE_FILES = ("index.html", "server.py", "scripts/sync_mail.py", "scripts/backfill_archive.py",
+                "assets/left-banner-night.jpg")
 UPDATE_MAX_BYTES = 8 * 1024 * 1024     # 파일 하나 상한
 UPDATE_TIMEOUT = 20                    # 요청 타임아웃(초)
 
