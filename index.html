@@ -4304,7 +4304,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       const groups = senderGroups(base);
       /* ✨ v1.2.23 — 칩이 3줄로 늘어 목록을 밀어내지 않게, 처음엔 8개(좁은 화면 4개)만 보여주고
          나머지는 [+ N명 더보기]로 접어 둔다. 지금 고른 발신자가 접힌 쪽에 있으면 함께 보인다. */
-      const LIMIT = (typeof innerWidth === "number" && innerWidth < 760) ? 4 : 8;
+      const LIMIT = (typeof innerWidth === "number" && innerWidth < 760) ? 3 : 8;
       let shown = groups, moreHidden = 0;
       if (!view.senderMore && groups.length > LIMIT) {
         shown = groups.slice(0, LIMIT);
@@ -6833,6 +6833,13 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     syncTogs(); renderKpi(); renderSeg(); renderCalendar(); mbFadeNext(); renderList();
   });
   $("newClear").addEventListener("click", () => clearNew(view.kpi ? "kpi" : view.tab));
+  /* ✨ v1.2.23 — 탭 설명 띠 ✕ : 한 번 닫으면 모든 탭에서 함께 숨긴다(저장) */
+  document.addEventListener("click", (e) => {
+    const gx = e.target && e.target.closest ? e.target.closest("[data-guide-close]") : null;
+    if (!gx) return;
+    e.preventDefault(); e.stopPropagation();
+    guideSet(true);
+  }, true);
   $("chipRow").addEventListener("click", (e) => {
     /* ✨ v1.2.23 — [+ N명 더보기 ▾] / [접기 ▴] */
     const mb = e.target.closest("[data-sender-more]");

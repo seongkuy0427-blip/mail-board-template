@@ -1,7 +1,7 @@
 {
   "app": "CHUNIL Smart Mail Portal",
   "version": "1.2.23",
-  "generatedAt": "2026-11-25 09:32:38 (KST)",
+  "generatedAt": "2026-11-25 09:38:04 (KST)",
   "note": "자동 업데이트 기준표 — 서버는 이 파일의 sha256 과 내 파일을 비교해 달라진 것만 내려받습니다. 손으로 고치지 말고 make_manifest.py 로 다시 만드세요.",
   "updateFiles": [
     "index.html",
@@ -15,8 +15,8 @@
       "size": 138833
     },
     "index.html": {
-      "sha256": "54cc846625a4882bc3392736aa680eee1ce0c95365a7938f12ca57c6bfde76b6",
-      "size": 521870
+      "sha256": "70ff0749dcaa8844038f569746dd5aa3d4fdb4487a5c0c32c15093825ed36fe3",
+      "size": 522212
     },
     "board_config.json": {
       "sha256": "2f618b95c11c8eb7f995f823f32ea179daaf8113cece232b8745029f0819e2e4",
