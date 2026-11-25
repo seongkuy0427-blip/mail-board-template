@@ -24,11 +24,13 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import sync_mail as sm  # noqa: E402
+REAL_GEMINI = sm.Gemini      # 테스트에서 sm.Gemini 를 가짜로 바꾸므로 실제 클래스를 따로 붙잡아 둔다
 
 REAL_NMAIL = sm.Nmail      # 테스트에서 sm.Nmail 을 가짜로 바꾸므로 실제 파서를 따로 붙잡아 둔다
 
@@ -274,11 +276,14 @@ class FakeAddressBook:
 
 
 class FakeGemini:
+    ORDER: list = []        # v1.2.25 — 어떤 메일을 어떤 순서로 분석했는지(🔴 우선 분석 검증)
+
     def __init__(self, *a, **kw):
         self.calls = 0
 
     def analyze(self, mail, *, kind="받은편지함", brief=False, contacts=None, cache=None):
         self.calls += 1
+        FakeGemini.ORDER.append(str(mail.get("mf_no")))
         to_me = sm._is_to(mail)
         title = mail.get("subject", "")
         _dept = sm.our_dept_label()
@@ -1246,6 +1251,138 @@ def run(pin: str, keep: bool) -> int:
 
     check("명칭 통일 — AI 생략 안내가 ‘기록 보관‘", sm.SKIP_SIMPLE_SUMMARY.startswith("기록 보관")
           and "단순 공유" not in sm.SKIP_SIMPLE_SUMMARY, sm.SKIP_SIMPLE_SUMMARY)
+
+    # ─────────────────────────────────────────────────────────── v1.2.25
+    #  #9968 무료 Gemini 429 방어(쓰로틀·백오프·🔴 우선 분석·aiPending) · #10035 우회 모델 · #9951 To 오판정
+    OUR_TEAM = str(sm.OWNER.get("dept") or ME_DEPT)
+    v25_contacts = {
+        ME_ADDR: {"name": ME_NAME, "title": ME_TITLE, "dept": ME_DEPT},
+        "seyu@chunil.co.kr": {"name": "김세유", "title": "과장", "dept": OUR_TEAM},
+        "kanghan@chunil.co.kr": {"name": "강한", "title": "사원", "dept": OUR_TEAM},
+        "jhg@chunil.co.kr": {"name": "정하건", "title": "사원", "dept": "경영지원팀"},
+    }
+    v25_mine = {"mf_no": 9951001, "subject": "자재 납입 일정 확인 바랍니다",
+                "bodyText": "하기 품번 납입 일정 확인 바랍니다.\n\n13524683 11EA\n",
+                "from_raw": '"김세유" <seyu@chunil.co.kr>', "from_email": "seyu@chunil.co.kr",
+                "to": [f"{ME_NAME} <{ME_ADDR}>"], "cc": [], "date": "2026-11-25 09:10",
+                "mailLink": sm.MAIL_LINK % ("inbox", 9951001)}
+    v25_ruling = sm.dept_ruling(v25_mine, v25_contacts)
+    check("#9951 — 우리 팀원이 보냈어도 내가 수신(To)이면 내가 확인·조치할 건",
+          v25_ruling["sender_ours"] and v25_ruling["addressed_to_me"] and v25_ruling["ours"]
+          and not v25_ruling["reply_done"], str(v25_ruling)[:110])
+    v25_our, v25_my = sm.concrete_actions(v25_mine, v25_contacts, ruling=v25_ruling)
+    check("#9951 — 결론이 ‘회신·송부 완료’가 아니라 [직접 회신 필요]",
+          v25_our.startswith("[직접 회신 필요]") and "회신·송부 완료" not in v25_our
+          and "추가 회신 없음" not in v25_my, f"{v25_our} / {v25_my}")
+    v25_pol = sm.polish_actions({"ourDeptAction": "[회신·송부 완료 · 우리 부서(발신자) → 김세유 과장에게 처리 완료]",
+                                 "myAction": "[추가 회신 없음 · 처리 이력 확인용]",
+                                 "replyStatus": "no_reply_needed", "actionItems": [],
+                                 "mainDept": sm.our_dept_label(), "deptBasis": ""},
+                                v25_mine, v25_contacts)
+    check("#9951 — AI 가 ‘회신·송부 완료’로 써도 후처리에서 바로잡는다",
+          v25_pol["ourDeptAction"].startswith("[직접 회신 필요]")
+          and v25_pol["replyStatus"] == "needs_reply", f'{v25_pol["ourDeptAction"]}')
+    v25_aibt = {"mf_no": 9951003, "subject": "RE: AIBT 자격증 원서접수 현황 회신 요청",
+                "bodyText": "해당자 없습니다.", "from_raw": '"강한" <kanghan@chunil.co.kr>',
+                "from_email": "kanghan@chunil.co.kr", "date": "2026-11-25 09:20",
+                "to": ["정하건 <jhg@chunil.co.kr>"], "cc": [f"{ME_NAME} <{ME_ADDR}>"],
+                "mailLink": sm.MAIL_LINK % ("inbox", 9951003)}
+    v25_aibt_our, _ = sm.concrete_actions(v25_aibt, v25_contacts)
+    check("#9951 — 팀원이 타팀에 회신한 AIBT 건은 기존처럼 ‘회신·송부 완료’ 유지",
+          not sm.dept_ruling(v25_aibt, v25_contacts)["addressed_to_me"]
+          and v25_aibt_our.startswith("[회신·송부 완료"), v25_aibt_our)
+
+    check("#9968 — Gemini 기본값: 호출 간 4.0초(pause) · 재시도 4회",
+          REAL_GEMINI.DEFAULT_PAUSE == 4.0 and REAL_GEMINI("k").pause == 4.0
+          and REAL_GEMINI("k").retries == 4, f'{REAL_GEMINI("k").pause}/{REAL_GEMINI("k").retries}')
+    _t = REAL_GEMINI("k", pause=0.05)
+    _t0 = time.monotonic()
+    _t._throttle()
+    _t._throttle()
+    check("#9968 — pause=0.05 두 번 호출 사이에 실제로 0.05초를 번다",
+          time.monotonic() - _t0 >= 0.045)
+
+    class _Resp25:
+        def __init__(self, code, headers=None, text=""):
+            self.status_code, self.headers, self.text = code, headers or {}, text
+
+        def json(self):
+            return {"candidates": []}
+
+    _waits: list = []
+    _seq: list = []
+    _real_post, _real_sleep = sm.requests.post, sm.time.sleep
+    sm.requests.post = lambda *a, **kw: _Resp25(*_seq.pop(0))
+    sm.time.sleep = lambda s: _waits.append(s)
+    try:
+        _seq[:] = [(429, {"Retry-After": "7"}), (200, {})]
+        REAL_GEMINI("k", pause=0)._request({"x": 1})
+        check("#9968 — 429 는 Retry-After(7초)를 그대로 존중", _waits == [7.0], _waits)
+        _waits.clear()
+        _g25 = REAL_GEMINI("k", pause=0)
+        _seq[:] = [(429, {}), (429, {}), (429, {}), (429, {})]
+        try:
+            _g25._request({"x": 1})
+        except sm.GeminiError:
+            pass
+        check("#9968 — Retry-After 가 없으면 15초부터 벌고, 계속 429 면 우회 모델로 갈아탄다",
+              _waits == [15, 45] and _g25.model == "gemini-3.1-flash-lite", f"{_waits} {_g25.model}")
+        _waits.clear()
+        _seq[:] = [(503, {}), (200, {})]
+        REAL_GEMINI("k", pause=0)._request({"x": 1})
+        check("#9968 — 5xx 는 기존 짧은 백오프 유지(2초)", _waits == [2], _waits)
+        _waits.clear()
+        _g35 = REAL_GEMINI("k", pause=0)
+        _seq[:] = [(429, {}, '{"error":{"status":"RESOURCE_EXHAUSTED","message":'
+                             '"You exceeded your current quota, please check your plan and billing details."}}'),
+                   (200, {})]
+        _g35._request({"x": 1})
+        check("#10035 — 429 일일 한도 소진 → gemini-3.5-flash-lite 로 즉시 우회(대기 없음)",
+              _g35.model == "gemini-3.5-flash-lite" and _waits == [], f"{_g35.model} {_waits}")
+        _waits.clear()
+        _seq[:] = [(429, {}, "Quota exceeded for metric: requests per day"), (200, {})]
+        _g35._request({"x": 1})
+        check("#10035 — 또 소진되면 gemini-3.1-flash-lite 로 한 번 더 우회",
+              _g35.model == "gemini-3.1-flash-lite" and _waits == [], f"{_g35.model} {_waits}")
+        check("#10035 — 우회 상태는 이 런에서만 — 새 인스턴스는 원래 모델로",
+              REAL_GEMINI("k").model == sm.DEFAULT_MODEL, REAL_GEMINI("k").model)
+    finally:
+        sm.requests.post, sm.time.sleep = _real_post, _real_sleep
+
+    class _Boom25:
+        def analyze(self, *a, **kw):
+            raise sm.GeminiError("HTTP 429: quota exceeded")
+
+    v25_pend_mail = dict(v25_mine, mf_no=9951002, mailLink=sm.MAIL_LINK % ("inbox", 9951002))
+    v25_pend_res = sm._run_ai(_Boom25(), v25_pend_mail, "받은편지함", v25_contacts, None,
+                              {"gemini_calls": 0, "warnings": []}, False)
+    v25_pend_item = sm.build_item(v25_pend_mail, v25_pend_res, v25_contacts, sm.kst_now())
+    check("#9968 — AI 실패 폴백은 항목에 aiPending·aiPendingAt 을 남긴다",
+          v25_pend_res.get("aiPending") is True and v25_pend_item.get("aiPending") is True
+          and bool(v25_pend_item.get("aiPendingAt")))
+
+    class _NmRead25:
+        def read_mail(self, box, mf_no):
+            return dict(v25_pend_mail)
+
+        def fetch_bytes(self, url, cap=400_000):
+            return None
+
+    v25_got = sm.retry_ai_pending(FakeGemini(), _NmRead25(), [v25_pend_item], v25_contacts, {}, {})
+    check("#9968 — 다음 주기 재분석으로 채우고 aiPending 을 지운다",
+          v25_got == 1 and not v25_pend_item.get("aiPending") and bool(v25_pend_item.get("aiRetriedAt")),
+          f"retried={v25_got}")
+    check("#9968 — 재시도 상한은 주기당 5건",
+          sm.AI_PENDING_PER_SYNC == 5 and len(sm.ai_pending_items([{"aiPending": True}] * 9)) == 5)
+    _ih25 = open(os.path.join(ROOT, "index.html"), encoding="utf-8").read()
+    check("v1.2.25 — 화면 버전·배너 3분 전환",
+          '"1.2.25"' in _ih25 and "const BANNER_SWAP_MS = 3 * 60 * 1000" in _ih25
+          and ">v1.2.25</span>" in _ih25)
+    check("#9968 — 첫 실행에서 🔴 즉시 메일을 🟡 흐름 참고보다 먼저 분석한다",
+          str(base + 1) in FakeGemini.ORDER and str(base + 5) in FakeGemini.ORDER
+          and FakeGemini.ORDER.index(str(base + 1)) < FakeGemini.ORDER.index(str(base + 5)),
+          FakeGemini.ORDER)
+
 
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}건 — {fails}")
     if keep:

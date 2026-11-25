@@ -2137,6 +2137,11 @@ REPLY_DONE_RE = re.compile(
 )
 
 
+#  v1.2.25 (#9951) — AI 가 '이미 처리한 일'처럼 쓴 표현. 우리가 받아서 해야 할 건에는 쓰지 않는다.
+REPLY_DONE_CLAIM_RE = re.compile(
+    r"회신\s*[·\s]*송부\s*완료|회신\s*완료|송부\s*완료|처리\s*완료|조치\s*완료|이미\s*(?:회신|송부)")
+
+
 def sender_is_ours(mail: dict, contacts: dict | None = None) -> bool:
     """발신자가 나 또는 우리 부서(납입1팀) 팀원인가 — 이미 우리가 보낸 메일인지 가르는 기준."""
     contacts = contacts or {}
@@ -2192,7 +2197,11 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
     # 본문이 타 부서 업무 중심이고 우리 팀 지목도, 우리 업무 신호도 없으면 주담당을 넘긴다
     other_main = bool(other) and other_score >= 2 and not mentioned and our_hits == 0
     sender_ours = sender_is_ours(mail, contacts)      # v1.2.21 — 발신자가 우리 부서(팀)인가
-    ours = (to_me or in_to or mentioned) and not other_main and not sender_ours
+    # v1.2.25 (#9951) — 발신자가 우리 부서 팀원이더라도 로그인 사용자가 수신(To)이거나 본문에서 나를
+    #   직접 지목했으면 '우리가 이미 보낸 메일'로 넘기지 않고 내가 확인·조치할 건으로 판정한다.
+    #   (팀원이 외부·타팀에 회신한 AIBT 건처럼 내가 To 가 아니면 기존처럼 회신 완료로 남긴다)
+    addressed_to_me = bool(to_me or mentioned)
+    ours = (to_me or in_to or mentioned) and not other_main and (not sender_ours or addressed_to_me)
     to_label = "" if ours else _first_to_label(mail, contacts)
     if ours:
         main = label
@@ -2202,7 +2211,10 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
         main = f"{to_label}(주담당) · 우리 부서({label})는 참조"
     else:
         main = "확인 필요(주담당 부서 미상)"
-    if ours and mentioned:
+    if sender_ours and addressed_to_me:
+        where = "수신(To)이 나" if to_me else "본문에서 나를 직접 지목"
+        basis = f"발신자는 우리 부서({label}) 팀원이지만 {where} — 내가 확인·조치할 건"
+    elif ours and mentioned:
         basis = "본문에서 우리 부서/이름이 직접 요청 대상으로 지목됨"
     elif ours and to_me:
         basis = "우리 팀이 수신(To) · 본문 요청 대상도 우리 업무 범위"
@@ -2217,8 +2229,9 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
     else:
         basis = "참조(CC)만 있고 본문 지목이 없어 주담당 판별 어려움 — 원문 확인 권장"
     reply_done = False
-    if sender_ours:
+    if sender_ours and not addressed_to_me:
         # v1.2.21 — 우리가 이미 보낸 메일(RE: 답장·회신/송부 완료 표현)은 발신자에게 다시 회신하지 않는다
+        # v1.2.25 — 내가 수신(To)·본문 지목이면 이 분기를 타지 않는다(#9951 오판정)
         reply_done = bool(REPLY_SUBJECT_RE.match(str(mail.get("subject") or ""))) \
             or bool(REPLY_DONE_RE.search(fresh or ""))
         main = (f"{to_label}(수신) · 우리 부서({label})는 발신" if to_label
@@ -2226,7 +2239,7 @@ def dept_ruling(mail: dict, contacts: dict | None = None) -> dict:
         basis = ("발신자가 우리 부서(팀) — 우리가 이미 보낸 메일"
                  + (" · 본문에 회신·송부 완료 표현" if reply_done else ""))
     return {"to_me": to_me, "in_to": in_to, "mentioned": mentioned,
-            "ours": ours, "other": (other or (to_label if to_label else "")) if not ours else "",
+            "addressed_to_me": addressed_to_me, "ours": ours, "other": (other or (to_label if to_label else "")) if not ours else "",
             "other_kind": ("dept" if other else ("person" if (to_label and not ours) else "")),
             "main": main, "basis": basis,
             "sender_ours": sender_ours, "reply_done": reply_done}
@@ -2303,7 +2316,9 @@ def _request_target(mail: dict) -> str:
 def concrete_actions(mail: dict, contacts: dict | None = None, *, ruling: dict | None = None) -> tuple[str, str]:
     """[구체적 행위 + 대상/품번 + 회신 대상자] 형태의 (우리 부서 할 일, 내 할 일)."""
     ruling = ruling or dept_ruling(mail, contacts)
-    if ruling.get("sender_ours"):     # v1.2.21 — 우리가 보낸 메일: 발신자에게 회신하라는 결론을 내지 않는다
+    if ruling.get("sender_ours") and not ruling.get("addressed_to_me"):
+        # v1.2.21 — 우리가 보낸 메일: 발신자에게 회신하라는 결론을 내지 않는다
+        # v1.2.25 — 내가 수신(To)·본문 지목이면(#9951) 내가 확인·조치할 건으로 본다
         return _ours_reply_conclusion(mail, contacts, bool(ruling.get("reply_done")))
     target = _request_target(mail)
     who = _sender_phrase(mail, contacts) or "요청자"
@@ -2340,8 +2355,9 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
     """AI 가 상투어·일이 없다는 식의 마무리를 냈거나 주담당을 잘못 올렸으면 바로잡는다."""
     ruling = dept_ruling(mail, contacts)
     fb_our, fb_my = concrete_actions(mail, contacts, ruling=ruling)
-    if ruling.get("sender_ours"):
+    if ruling.get("sender_ours") and not ruling.get("addressed_to_me"):
         # v1.2.21 — AI 가 ‘[직접 회신 필요] … → 발신자에게 회신’ 으로 써도 우리가 보낸 메일이면 바로잡는다
+        # v1.2.25 — 발신자가 우리 팀원이어도 내가 수신(To)·본문 지목이면(#9951) 이 초기화를 건너뛴다
         result["ourDeptAction"] = fb_our
         result["myAction"] = fb_my
         result["mainDept"] = ruling["main"]
@@ -2349,13 +2365,23 @@ def polish_actions(result: dict, mail: dict, contacts: dict | None = None) -> di
         result["replyStatus"] = "no_reply_needed"
         result["actionItems"] = []
         return result
+    if ruling.get("sender_ours") and ruling.get("addressed_to_me"):
+        # v1.2.25 (#9951) — 팀원이 나에게 직접 보낸 확인·요청 건은 '회신·송부 완료'나 '추가 회신 없음'이 아니다.
+        #   AI 가 이미 [직접 회신 필요]로 쓴 결론은 살리고, 아니면 아래에서 만든 실제 할 일로 바로잡는다.
+        if result.get("replyStatus") == "no_reply_needed":
+            result["replyStatus"] = "needs_reply"
+        if not str(result.get("ourDeptAction") or "").startswith("[직접 회신 필요]"):
+            result["ourDeptAction"] = fb_our
+        if not str(result.get("myAction") or "").startswith("[직접 회신 필요]"):
+            result["myAction"] = fb_my
     our = str(result.get("ourDeptAction") or "").strip()
     my = str(result.get("myAction") or "").strip()
     bad = lambda t: (not t) or any(b in t for b in ACTION_BANNED) or bool(ACTION_BANNED_RE.search(t))
     if ruling["ours"]:
-        if bad(our):
+        # v1.2.25 — AI 가 이미 끝난 일처럼 '회신·송부 완료'로 쓴 경우도 바로잡는다(#9951)
+        if bad(our) or REPLY_DONE_CLAIM_RE.search(our):
             our = fb_our
-        if bad(my):
+        if bad(my) or REPLY_DONE_CLAIM_RE.search(my):
             my = fb_my
     else:
         # v1.2.18 — 우리 부서 일이 아니면 AI 가 ‘[직접 회신 필요]’로 써도 결론·할 일을 우리 팀 기준으로 바로잡는다
@@ -3077,13 +3103,23 @@ def _run_ai(gem, mail: dict, kind: str, contacts: dict | None, cache: dict | Non
             if isinstance(stats, dict):
                 stats["gemini_calls"] = int(stats.get("gemini_calls") or 0) + 1
             res = gem.analyze(mail, kind=kind, contacts=contacts, cache=cache, brief=brief)
-            return normalize_analysis(res, mail, cache, contacts)
+            out = normalize_analysis(res, mail, cache, contacts)
+            out.pop("aiPending", None)      # v1.2.25 — 성공하면 재시도 대기 표시를 지운다
+            out.pop("aiPendingAt", None)
+            return out
         except Exception as e:  # noqa: BLE001 - 한 건 실패가 전체를 멈추지 않게
             # 로그가 공개될 수 있으므로 메일 제목·본문은 오류 문구에 넣지 않는다
             msg = f"Gemini 실패(mf_no={mail.get('mf_no')}): {type(e).__name__}: {str(e)[:160]}"
             if isinstance(stats, dict):
                 stats.setdefault("warnings", []).append(msg)
+                stats["ai_failed"] = int(stats.get("ai_failed") or 0) + 1
             print(f"  ! {msg}", file=sys.stderr)
+            # v1.2.25 (#9968) — 429·네트워크 오류로 폴백한 건은 aiPending 으로 남겨 다음 주기에 다시 채운다
+            fb = normalize_analysis(heuristic_analysis(mail, _is_to(mail), contacts, cache=cache),
+                                    mail, cache, contacts)
+            fb["aiPending"] = True
+            fb["aiPendingAt"] = kst_now().strftime("%Y-%m-%d %H:%M")
+            return fb
     return normalize_analysis(heuristic_analysis(mail, _is_to(mail), contacts, cache=cache), mail, cache, contacts)
 
 
@@ -3490,9 +3526,28 @@ def model_hint(text: str, *, current: str = "") -> str:
 
 
 class Gemini:
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, *, timeout: int = 90, retries: int = 3):
+    # v1.2.25 (#9968) — 무료 등급 분당 요청 한도(RPM) 대비 기본 호출 간격(초).
+    #   대량 동기화에서 429 가 나기 전에 미리 간격을 벌린다. 테스트·목업은 pause=0 으로 끈다.
+    DEFAULT_PAUSE = 4.0
+    # 429 백오프 — Retry-After 헤더가 없을 때 시도별 대기(초) 15 → 30 → 45.
+    BACKOFF_429 = (15, 30, 45)
+    # v1.2.25 (#10035) — 무료 등급 일일 한도(RPD)가 큰 모델로 자동 우회하는 순서.
+    #   3.8-flash 는 20건/일, 3.5-flash-lite 는 500건/일(25배). 우회 상태는 이 인스턴스(한 번의 동기화) 안에서만
+    #   유지되고, 다음 주기는 새 인스턴스라 다시 DEFAULT_MODEL 로 시작한다.
+    FALLBACK_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+    #   일일 한도(RPD) 소진을 뜻하는 응답 문구 — 분당 한도(RPM)와 구분해 기다리지 않고 모델을 바꾼다.
+    QUOTA_HINTS = ("exceeded your current quota", "quota exceeded", "quota_exceeded",
+                   "resource_exhausted", "requests per day", "per day", "daily limit")
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, *, timeout: int = 90,
+                 retries: int = 4, pause: float | None = None):
         self.key, self.model, self.timeout, self.retries = api_key, model, timeout, retries
+        self.pause = self.DEFAULT_PAUSE if pause is None else max(0.0, float(pause))
+        self._last_call = 0.0           # 마지막 analyze() 시각(monotonic) — 호출 간격 계산용
         self.switched = False           # 모델이 종료돼 다른 모델로 갈아탄 적이 있는지
+        self.withdrawn = False          # 429 일일 한도로 우회 모델로 갈아탄 적이 있는지(이 런 한정)
+        self.base_model = model         # 이 런의 시작 모델(우회 판정에서 되돌아가지 않게)
+        self.tried_models = {model}     # 이미 써 본 모델 — 같은 모델로 두 번 우회하지 않는다
         self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                     f"{model}:generateContent")
 
@@ -3503,6 +3558,58 @@ class Gemini:
         self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                     f"{model}:generateContent")
 
+    @classmethod
+    def quota_exhausted(cls, text: str) -> bool:
+        """429 응답이 '일일 한도(RPD) 소진'인가 — 분당 한도(RPM)와 구분한다 (#10035)."""
+        s = str(text or "").lower()
+        return any(hint in s for hint in cls.QUOTA_HINTS)
+
+    def use_fallback(self) -> bool:
+        """429 한도 소진 시 무료 한도가 큰 모델로 즉시 갈아탄다 (#10035). 갈아탔으면 True."""
+        for cand in self.FALLBACK_MODELS:
+            if cand == self.base_model or cand in self.tried_models:
+                continue
+            self.tried_models.add(cand)
+            self.withdrawn = True
+            print(f"  ! Gemini 429 한도 소진 — 모델 '{self.model}' → '{cand}' 로 우회합니다(이번 동기화 한정)")
+            self.model = cand
+            self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                        f"{cand}:generateContent")
+            return True
+        return False
+
+    def _throttle(self) -> None:
+        """analyze() 호출 사이 최소 간격(pause 초)을 지킨다 — 무료 등급 분당 한도 초과 예방 (v1.2.25)."""
+        if self.pause <= 0:
+            return
+        if self._last_call:
+            wait = self.pause - (time.monotonic() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+        self._last_call = time.monotonic()
+
+    @staticmethod
+    def _retry_after(headers) -> float | None:
+        """429 응답의 Retry-After(초 또는 HTTP 날짜) → 대기 초. 없거나 이상하면 None (v1.2.25)."""
+        try:
+            raw = (headers or {}).get("Retry-After") or (headers or {}).get("retry-after")
+        except Exception:  # noqa: BLE001 - 헤더 모양이 달라도 429 처리는 계속한다
+            return None
+        if not raw:
+            return None
+        try:
+            sec = float(str(raw).strip())
+        except (TypeError, ValueError):
+            try:
+                from email.utils import parsedate_to_datetime
+                sec = (parsedate_to_datetime(str(raw)) -
+                       dt.datetime.now(dt.timezone.utc)).total_seconds()
+            except Exception:  # noqa: BLE001 - 날짜 형식도 아니면 기본 백오프를 쓴다
+                return None
+        if sec <= 0:
+            return None
+        return min(sec, 120.0)          # 너무 오래 매달리지 않게 상한
+
     def _request(self, payload: dict) -> dict:
         last = None
         for attempt in range(1, self.retries + 1):
@@ -3511,26 +3618,39 @@ class Gemini:
                                   timeout=self.timeout, headers={"Content-Type": "application/json"})
             except requests.RequestException as e:            # 네트워크
                 last = str(e)
-            else:
-                if r.status_code == 200:
-                    return r.json()
-                last = f"HTTP {r.status_code}: {r.text[:400]}"
-                if r.status_code in (429, 500, 502, 503, 504):
-                    time.sleep(min(2 ** attempt, 20))
+                time.sleep(min(2 ** attempt, 20))
+                continue
+            if r.status_code == 200:
+                return r.json()
+            last = f"HTTP {r.status_code}: {r.text[:400]}"
+            if r.status_code == 429:
+                # v1.2.25 (#9968·#10035) — 무료 등급 한도.
+                #   · 일일 한도(RPD) 소진 문구가 오거나 재시도 뒤에도 429 면 45초씩 기다리지 않고
+                #     무료 한도가 25배 큰 모델(3.5-flash-lite)로 즉시 우회해 바로 재시도한다.
+                #   · 그 밖의 분당 한도(RPM)는 Retry-After 를 존중하고, 없으면 15 → 30 → 45초로 버틴다.
+                if (self.quota_exhausted(r.text) or attempt >= 2) and self.use_fallback():
                     continue
-                if r.status_code == 404 and not self.switched:
-                    hint = model_hint(r.text, current=self.model)
-                    if hint:
-                        self._use_model(hint)
-                        continue        # 새 모델로 바로 다시 시도
-                raise GeminiError(last)
-            time.sleep(min(2 ** attempt, 20))
+                wait = self._retry_after(getattr(r, "headers", None))
+                if wait is None:
+                    wait = self.BACKOFF_429[min(attempt - 1, len(self.BACKOFF_429) - 1)]
+                time.sleep(wait)
+                continue
+            if r.status_code in (500, 502, 503, 504):
+                time.sleep(min(2 ** attempt, 20))            # 5xx 는 짧은 백오프 유지
+                continue
+            if r.status_code == 404 and not self.switched:
+                hint = model_hint(r.text, current=self.model)
+                if hint:
+                    self._use_model(hint)
+                    continue        # 새 모델로 바로 다시 시도
+            raise GeminiError(last)
         raise GeminiError(f"Gemini 요청 실패: {last}")
 
     def analyze(self, mail: dict, *, kind: str = "받은편지함", brief: bool = False,
                 contacts: dict | None = None, cache: dict | None = None) -> dict:
         #  v1.2.11 — 이전 회신을 자르지 않은 전체 스레드 + 사내 조직 컨텍스트.
         #  스레드 캐시(cache)가 있으면 '누적 타임라인 + 새 메일 1통'만 보낸다(증분 분석).
+        self._throttle()                # v1.2.25 — 호출 사이 기본 4초 간격(무료 등급 RPM 예방)
         text = analysis_input_text(mail, kind, contacts=contacts, cache=cache, brief=brief)
         payload = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
@@ -4247,6 +4367,9 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
     if analysis.get("aiSkipped"):
         item["aiSkipped"] = True
         item["replyDrafts"] = {}
+    if analysis.get("aiPending"):       # v1.2.25 — AI 실패 폴백: 다음 동기화 주기에 다시 분석해 채운다
+        item["aiPending"] = True
+        item["aiPendingAt"] = analysis.get("aiPendingAt") or now.strftime("%Y-%m-%d %H:%M")
     if analysis.get("analysisBody"):
         item["analysisBody"] = str(analysis["analysisBody"])[:4000]
     body = clean_body(mail.get("bodyText") or "")
@@ -4473,6 +4596,91 @@ def kst_now() -> dt.datetime:
     return dt.datetime.now(KST)
 
 
+# ── aiPending 재시도 (v1.2.25 · #9968) ─────────────────────────────────────
+#  429·네트워크 오류로 AI 분석이 빠져 휴리스틱 폴백이 들어간 메일은 항목에 aiPending=true 를 남긴다.
+#  다음 동기화 주기마다 최근 것부터 최대 5건을 다시 AI 분석해 채워 넣고, 성공하면 표시를 지운다.
+AI_PENDING_PER_SYNC = 5
+ANALYSIS_ITEM_KEYS = ("headline", "mainDept", "deptBasis", "ourDeptAction", "myAction",
+                      "summary", "actionItems", "dueDate", "deadline", "replyStatus",
+                      "category", "urgency", "threadGist", "tags", "replyDrafts",
+                      "background", "aiSkipped", "aiSkipReason")
+
+
+def ai_pending_items(items: list[dict] | None, limit: int = AI_PENDING_PER_SYNC) -> list[dict]:
+    """다시 분석할 aiPending 항목 — 최근 것부터(보관 처리한 항목은 제외)."""
+    pend = [it for it in (items or [])
+            if isinstance(it, dict) and it.get("aiPending") and not it.get("archived")]
+    pend.sort(key=lambda it: str(it.get("lastAt") or it.get("receivedAt") or ""), reverse=True)
+    return pend[:max(0, int(limit))] if limit else pend
+
+
+def apply_analysis_to_item(item: dict, analysis: dict) -> None:
+    """재분석 결과를 이미 보드에 있는 항목에 반영한다(화면 필드 이름 그대로)."""
+    for key in ANALYSIS_ITEM_KEYS:
+        if key not in analysis:
+            continue
+        val = analysis.get(key)
+        if key in ("actionItems", "replyDrafts"):
+            if isinstance(val, (list, dict)):
+                item[key] = val
+        elif val is not None and val != "":
+            item[key] = val
+    if item.get("replyStatus") == "needs_reply":
+        item["replyDrafts"] = normalize_reply_drafts(item.get("replyDrafts"), item)
+    gist = str(analysis.get("threadGist") or "").strip()
+    if gist and item.get("thread"):
+        first = item["thread"][0]
+        if isinstance(first, dict) and str(first.get("id") or "") == str(item.get("id") or ""):
+            first["gist"] = gist
+
+
+def retry_ai_pending(gem, nm, items: list[dict] | None, contacts: dict | None,
+                     thread_cache: dict | None, stats: dict | None,
+                     *, limit: int = AI_PENDING_PER_SYNC) -> int:
+    """aiPending(429·네트워크 실패 폴백) 항목을 다시 AI 분석해 채운다 — 채운 건수를 돌려준다."""
+    if gem is None:
+        return 0
+    done = 0
+    for it in ai_pending_items(items, limit):
+        mf_no = str(it.get("id") or "").split("-")[-1]
+        if not mf_no.isdigit():
+            continue
+        box = it.get("mailbox") or "inbox"
+        mail = {
+            "mf_no": mf_no, "box": box,
+            "subject": it.get("title") or "",
+            "bodyText": it.get("analysisBody") or it.get("bodyText") or "",
+            "from_raw": it.get("senderName") or it.get("sender") or "",
+            "from_email": it.get("senderEmail") or "",
+            "to": it.get("to") or [], "cc": it.get("cc") or [],
+            "date": it.get("receivedAt") or "",
+            "attachments": it.get("attachments") or [],
+            "mailLink": it.get("mailLink") or (MAIL_LINK % (box, mf_no)),
+        }
+        if it.get("attachmentText"):
+            mail["attachmentText"] = it["attachmentText"]
+        try:      # 보드 본문은 2,500자만 남으므로 원문을 다시 읽어 온다(실패하면 저장분으로)
+            fresh = nm.read_mail(box, int(mf_no))
+            if str(fresh.get("bodyText") or "").strip():
+                fresh.update({"mf_no": mf_no, "box": box,
+                              "subject": fresh.get("subject") or mail["subject"],
+                              "mailLink": fresh.get("mailLink") or mail["mailLink"]})
+                mail = fresh
+        except Exception as e:  # noqa: BLE001 - 다시 못 읽으면 보드에 있는 본문으로 분석한다
+            print(f"  ! aiPending 재분석 본문 읽기 실패(mf_no={mf_no}): {type(e).__name__}",
+                  file=sys.stderr)
+        analysis = analyze_mail(gem, mail, "받은편지함", contacts, thread_cache=thread_cache,
+                                stats=stats, fetcher=nm)
+        if analysis.get("aiPending"):
+            continue                    # 또 실패 — 다음 주기에 다시 시도한다
+        apply_analysis_to_item(it, analysis)
+        it.pop("aiPending", None)
+        it.pop("aiPendingAt", None)
+        it["aiRetriedAt"] = kst_now().strftime("%Y-%m-%d %H:%M")
+        done += 1
+    return done
+
+
 def sync(args: argparse.Namespace) -> dict:
     pin = os.environ.get("MAILBOARD_PIN", "").strip()
     if not pin:
@@ -4545,24 +4753,35 @@ def sync(args: argparse.Namespace) -> dict:
         report["historyMerged"] = hist_merged
     if att_cleaned:
         report["attachmentsCleaned"] = att_cleaned
+    gem = Gemini(args.gemini_key, args.gemini_model) if args.gemini_key else None
+    thread_cache = data.setdefault("thread_cache", {})
+    # v1.2.25 (#9968) — 429·네트워크로 AI 분석이 빠진 메일(aiPending)은 새 메일이 없어도 매 주기
+    #   최근 것부터 몇 건씩 다시 분석해 채운다(무료 한도가 풀린 다음 주기에 자연히 복구된다).
+    ai_retried = retry_ai_pending(gem, nm, items, contacts, thread_cache, report)
+    if ai_retried:
+        report["aiRetried"] = ai_retried
+
     if (not inbox and not sent and not is_new and not contacts_added
-            and not drafts_refreshed and not to_repaired and not hist_merged and not att_cleaned):
+            and not drafts_refreshed and not to_repaired and not hist_merged and not att_cleaned
+            and not ai_retried):
         report["changed"] = False
         return report
-
-    gem = Gemini(args.gemini_key, args.gemini_model) if args.gemini_key else None
-
-    thread_cache = data.setdefault("thread_cache", {})
 
     def analyze(mail: dict, kind: str) -> dict:
         # v1.2.21 — 기록 보관만 AI 생략, 나머지는 3단 정밀 분석(스레드 증분) · 첨부 핵심 내용 포함
         return analyze_mail(gem, mail, kind, contacts, thread_cache=thread_cache, stats=report, fetcher=nm)
 
     added = 0
+    # v1.2.25 (#9968) — 🔴 즉시(우선순위 1) 메일을 🟡 흐름 참고보다 먼저 분석한다.
+    #   무료 Gemini 한도가 빠듯한 날에도 중요 메일은 AI 분석을 받도록 순서를 보장한다.
+    staged = []
     for row in inbox:
         detail = nm.read_mail("inbox", row["mf_no"])
         if not detail.get("subject"):
             detail["subject"] = row["subject"]
+        staged.append((int(prefilter(detail, contacts).get("priority") or 2), row, detail))
+    staged.sort(key=lambda t: t[0])          # 안정 정렬 — 같은 등급 안에서는 최신순 그대로
+    for _pri, row, detail in staged:
         if args.images and detail.get("images"):
             detail["imagesData"] = collect_images(nm, detail["images"], report)
         analysis = analyze(detail, "받은편지함")
@@ -4573,8 +4792,11 @@ def sync(args: argparse.Namespace) -> dict:
         else:
             items.append(new_item)
             added += 1
-        report["new_inbox"][-1].update({"priority": new_item["priority"], "sender": new_item["sender"],
-                                        "summary": new_item["summary"][:120], "merged_into": target.get("id") if target else None})
+        rec = next((r for r in report["new_inbox"] if r["mf_no"] == row["mf_no"]), None)
+        if rec is not None:
+            rec.update({"priority": new_item["priority"], "sender": new_item["sender"],
+                        "summary": new_item["summary"][:120],
+                        "merged_into": target.get("id") if target else None})
 
     for row in sent:
         if not args.track_replies:
@@ -4596,8 +4818,12 @@ def sync(args: argparse.Namespace) -> dict:
         report["summariesRefreshed"] = refreshed
     if drafts_refreshed:                      # 옛 답장 초안 3종 → 실무형 3안 (v1.2.8)
         report["draftsRefreshed"] = drafts_refreshed
+    if gem is not None:      # v1.2.25 (#10035) — 이번 동기화에서 우회 모델로 갈아탔는지 로그에 남긴다
+        report["geminiModel"] = getattr(gem, "model", "") or ""
+        if getattr(gem, "withdrawn", False):
+            report["geminiFallback"] = True
     changed = bool(refreshed or drafts_refreshed or added or report["replied"] or contacts_added
-                   or to_repaired or att_fixed or hist_merged or att_cleaned
+                   or to_repaired or att_fixed or hist_merged or att_cleaned or ai_retried
                    or any(m.get("merged_into") for m in report["new_inbox"]))
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)

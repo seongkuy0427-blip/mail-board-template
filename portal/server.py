@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.24"
+VERSION = "1.2.25"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1118,6 +1118,14 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             inbox = inbox[: CFG["max_new"]]
             sent = sent[: CFG["max_new"]]
 
+        gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"]) if CFG["gemini_key"] else None
+        report: dict[str, Any] = {"gemini_calls": 0, "warnings": []}
+        # v1.2.25 (#9968) — 429·네트워크로 AI 분석이 빠진 메일(aiPending)은 새 메일이 없어도 매 주기
+        #   최근 것부터 몇 건씩 다시 분석해 채운다. 한도가 풀린 다음 주기에 자연히 복구된다.
+        ai_retried = (sm.retry_ai_pending(gem, nm, board.get("items") or [], contacts,
+                                          board["thread_cache"], report)
+                      if gem is not None else 0)
+
         if not inbox and not sent and not first:
             try:      # 새 메일이 없어도 예전 요약·답장 초안은 한 번 정리한다 (v1.2.7 · v1.2.8)
                 fixed = sm.refresh_copied_summaries(board["items"], contacts)
@@ -1130,13 +1138,15 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
                     atomic_write_json(board_path, board, mode=0o600)
             except Exception as e:  # noqa: BLE001 - 정리가 실패해도 동기화 상태는 그대로 알린다
                 print(f"[sync] {uid} 요약 정리 실패: {type(e).__name__}", file=sys.stderr)
+            if ai_retried:
+                atomic_write_json(board_path, board, mode=0o600)
+                print(f"[sync] {uid} aiPending 재분석 {ai_retried}건 채움", flush=True)
             set_status(uid, state="ready", phase="done", progress=100,
-                       message="새 메일 없음 — 최신 상태입니다", lastSync=board.get("updatedAt"),
-                       _persist=True)
+                       message=("새 메일 없음 — 최신 상태입니다" if not ai_retried
+                                else f"새 메일 없음 · AI 재분석 {ai_retried}건 반영"),
+                       lastSync=board.get("updatedAt"), _persist=True)
             return public_status(uid)      # set_status 이후 상태를 돌려준다(syncing 이 아니라)
 
-        gem = GEMINI_CLASS(CFG["gemini_key"], CFG["gemini_model"]) if CFG["gemini_key"] else None
-        report: dict[str, Any] = {"gemini_calls": 0, "warnings": []}
         total = max(1, len(inbox) + len(sent))
         done = 0
 
@@ -1156,10 +1166,16 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         merged = 0
         title_sent: list[str] = []      # 직급 추론용 서명 글 — 보낸편지함
         title_inbox: list[str] = []     # 직급 추론용 호칭·인용 글 — 받은편지함
+        # v1.2.25 (#9968) — 🔴 즉시(우선순위 1) 메일을 🟡 흐름 참고보다 먼저 분석한다.
+        #   무료 Gemini 한도가 빠듯한 날에도 중요 메일은 AI 분석을 받도록 순서를 보장한다.
+        staged = []
         for row in inbox:
             detail = nm.read_mail("inbox", row["mf_no"])
             if not detail.get("subject"):
                 detail["subject"] = row["subject"]
+            staged.append((int(sm.prefilter(detail, contacts).get("priority") or 2), row, detail))
+        staged.sort(key=lambda t: t[0])          # 안정 정렬 — 같은 등급 안에서는 최신순 그대로
+        for _pri, row, detail in staged:
             title_inbox.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
             if CFG["images"] and detail.get("images"):
                 detail["imagesData"] = sm.collect_images(nm, detail["images"], report)
@@ -1653,6 +1669,9 @@ def mail_analyze(uid: str, mail_id: str, *, force: bool = False) -> dict:
             item[key] = val
     item["aiSkipped"] = False
     item.pop("aiSkipReason", None)
+    # v1.2.25 (#9968) — 수동·다시 분석이 성공했으면 aiPending(다음 주기 재시도) 표시를 지운다
+    item.pop("aiPending", None)
+    item.pop("aiPendingAt", None)
     item["analyzedAt"] = stamp()
     atomic_write_json(path, board, mode=0o600)
     print(f"[analyze] {uid} {mail_id} 정밀 분석 완료 — Gemini {stats.get('gemini_calls', 0)}회", flush=True)
