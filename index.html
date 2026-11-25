@@ -2569,7 +2569,8 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     fetch("/api/mail/mark-read", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: it.id, mf_no: Number(m[1]), box: box }),
-    }).catch(() => { MAIL_READ_SENT.delete(key); });
+    }).then((res) => { if (!res || !res.ok) MAIL_READ_SENT.delete(key); })   /* 실패하면 다음 확인 때 다시 */
+      .catch(() => { MAIL_READ_SENT.delete(key); });
   }
   /* ✅ 확인 — 완료로 바꾸면 기본 목록에서 즉시 치운다 (KPI '완료'에 반영, 검색하거나 '완료 포함'을 켜면 다시 보임) */
   function setDone(id, done) {
