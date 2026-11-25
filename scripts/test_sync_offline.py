@@ -1375,9 +1375,12 @@ def run(pin: str, keep: bool) -> int:
     check("#9968 — 재시도 상한은 주기당 5건",
           sm.AI_PENDING_PER_SYNC == 5 and len(sm.ai_pending_items([{"aiPending": True}] * 9)) == 5)
     _ih25 = open(os.path.join(ROOT, "index.html"), encoding="utf-8").read()
-    check("v1.2.26 — 화면 버전·배너 1분 전환",
-          '"1.2.26"' in _ih25 and "const BANNER_SWAP_MS = 60 * 1000" in _ih25
-          and ">v1.2.26</span>" in _ih25)
+    check("v1.2.27 — 화면 버전·배너 30초 블러+페이드 전환",
+          '"1.2.27"' in _ih25 and "const BANNER_SWAP_MS = 30 * 1000" in _ih25
+          and ">v1.2.27</span>" in _ih25
+          and "transition:opacity 2.6s cubic-bezier(.4,0,.2,1)" in _ih25
+          and "filter:blur(10px)" in _ih25
+          and ".left-banner .lb-layer{transition:none}" not in _ih25)
     check("#9968 — 첫 실행에서 🔴 즉시 메일을 🟡 흐름 참고보다 먼저 분석한다",
           str(base + 1) in FakeGemini.ORDER and str(base + 5) in FakeGemini.ORDER
           and FakeGemini.ORDER.index(str(base + 1)) < FakeGemini.ORDER.index(str(base + 5)),
