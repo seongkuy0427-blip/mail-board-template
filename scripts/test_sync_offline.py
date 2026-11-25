@@ -1376,11 +1376,51 @@ def run(pin: str, keep: bool) -> int:
           sm.AI_PENDING_PER_SYNC == 5 and len(sm.ai_pending_items([{"aiPending": True}] * 9)) == 5)
     _ih25 = open(os.path.join(ROOT, "index.html"), encoding="utf-8").read()
     check("v1.2.27 — 화면 버전·배너 30초 블러+페이드 전환",
-          '"1.2.27"' in _ih25 and "const BANNER_SWAP_MS = 30 * 1000" in _ih25
-          and ">v1.2.27</span>" in _ih25
+          "const BANNER_SWAP_MS = 30 * 1000" in _ih25
           and "transition:opacity 2.6s cubic-bezier(.4,0,.2,1)" in _ih25
           and "filter:blur(10px)" in _ih25
           and ".left-banner .lb-layer{transition:none}" not in _ih25)
+    # v1.2.28 — 원문 '안 읽음' 유지 · 확인 처리 때만 원문 '읽음'(#10347 → #10483)
+    check("v1.2.28 — 화면 버전·확인 시 원문 읽음(/api/mail/mark-read)",
+          '"1.2.28"' in _ih25 and ">v1.2.28</span>" in _ih25
+          and "function portalMarkRead(it)" in _ih25 and "/api/mail/mark-read" in _ih25
+          and "if (done) portalMarkRead(it);" in _ih25)
+    _mposts = []
+
+    class _MarkSess28:
+        def get(self, url, **kw):
+            html = ("<table class=\"table-condensed\"><tbody>"
+                        "<tr id=\"tr5418641\"><td><div class=\"mail-list-from\" title=\"a &lt;a@b.com&gt;\">a</div>"
+                        "<a href=\"mail_read.php?mb_id=inbox&amp;mf_no=5418641\">t</a>"
+                        "<span class=\"unread-mail\">N</span></td>"
+                        "<td class=\"nm_number\">26-11-25 09:07</td></tr>"
+                        "<tr id=\"tr5418640\"><td><div class=\"mail-list-from\" title=\"b &lt;b@b.com&gt;\">b</div>"
+                        "<a href=\"mail_read.php?mb_id=inbox&amp;mf_no=5418640\">t</a></td>"
+                        "<td class=\"nm_number\">26-11-25 08:44</td></tr></tbody></table>"
+                    if "mail_list.php" in url else "<html><body>본문</body></html>")
+            r = type("R", (), {})()
+            r.text, r.content, r.status_code = html, html.encode(), 200
+            r.url, r.encoding = url, "utf-8"
+            return r
+
+        def post(self, url, data=None, **kw):
+            _mposts.append((url, list(data or [])))
+            r = type("R", (), {})()   # noqa: F841 - 응답 흉내
+            r.text, r.content, r.status_code = "ok", b"ok", 200
+            r.url, r.encoding = url, "utf-8"
+            return r
+
+    _mnm = REAL_NMAIL("u", "p")
+    _mnm.s = _MarkSess28()
+    _mrows = _mnm.list_page("inbox")
+    for _mr in _mrows:
+        _mnm.read_mail("inbox", _mr["mf_no"])
+    _mrestored = _mnm.restore_unread()
+    check("v1.2.28 — 수집 뒤 '안 읽음'이던 메일만 되돌린다",
+          _mrestored == 1 and len(_mposts) == 1
+          and _mposts[0][0] == "https://mail.chunil.co.kr/mail_mark.php?mode=UNREAD&mb_id=inbox"
+          and _mposts[0][1] == [("cmf[]", "5418641")],
+          f"restored={_mrestored} posts={_mposts}")
     check("#9968 — 첫 실행에서 🔴 즉시 메일을 🟡 흐름 참고보다 먼저 분석한다",
           str(base + 1) in FakeGemini.ORDER and str(base + 5) in FakeGemini.ORDER
           and FakeGemini.ORDER.index(str(base + 1)) < FakeGemini.ORDER.index(str(base + 5)),

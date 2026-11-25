@@ -1593,7 +1593,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.27</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.28</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1832,7 +1832,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.27").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.28").replace(/^v/i, "");
   /* 🌃 왼쪽 사옥 배너 — 일출 ↔ 야경 30초 주기 전환 (#10275: 30초 · #10263: 블러+페이드).
      두 사진을 CSS 로 겹쳐 두고 30초(30,000ms)마다 .is-night 를 토글한다(2.6초 블러+크로스페이드).
      팝업·알림 없음, 토큰 소비 0. 새로고침하면 다시 일출부터 시작한다. */
@@ -2708,10 +2708,30 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     });
     setTimeout(() => setDone(id, true), 225);
   }
+  /* ✅ 확인 → 원문 웹메일도 '읽음' (v1.2.28 · #10347·#10483)
+     수집은 원문의 '안 읽음'을 그대로 둔다(서버가 본문을 읽은 뒤 다시 '안 읽음'으로 되돌린다).
+     그래서 상세를 열어 보기만 한 메일은 원문에 '안 읽음'으로 남고,
+     보드에서 ✓ 확인한 메일만 원문 웹메일이 '읽음'이 된다. 실패해도 화면은 그대로다. */
+  const MAIL_READ_SENT = new Set();
+  function portalMarkRead(it) {
+    if (!PORTAL || !it) return;
+    const m = String(it.id || "").match(/^m-(\d+)$/);
+    if (!m) return;                       /* 보낸편지함 발신·회신 항목 등 메일 번호가 없는 건 제외 */
+    const box = String(it.mailbox || "inbox").toLowerCase() === "sent" ? "sent" : "inbox";
+    const key = box + ":" + m[1];
+    if (MAIL_READ_SENT.has(key)) return;  /* 같은 메일을 두 번 보내지 않는다 */
+    MAIL_READ_SENT.add(key);
+    it.unread = false;
+    fetch("/api/mail/mark-read", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: it.id, mf_no: Number(m[1]), box: box }),
+    }).catch(() => { MAIL_READ_SENT.delete(key); });
+  }
   /* ✅ 확인 — 완료로 바꾸면 기본 목록에서 즉시 치운다 (KPI '완료'에 반영, 검색하거나 '완료 포함'을 켜면 다시 보임) */
   function setDone(id, done) {
     const it = byId(id); if (!it) return;
     itemState(id).status = done ? "done" : "todo"; saveState();
+    if (done) portalMarkRead(it);          /* v1.2.28 — 확인한 메일만 원문도 '읽음' */
     markSeenAll([id]);
     renderKpi(); renderSeg(); renderCalendar(); renderList();
     if (view.openId === id) $("drawerContent").innerHTML = drawerHtml(it);
@@ -2752,7 +2772,7 @@ try { view.calOpen = LSK.getItem(LS.cal) === "1"; } catch (e) {}
     if (key === "fu") return bulkFuDone(ids);
     const list = (ids || []).filter((id) => byId(id));
     if (!list.length) return;
-    list.forEach((id) => { itemState(id).status = "done"; });
+    list.forEach((id) => { itemState(id).status = "done"; portalMarkRead(byId(id)); });
     saveState();
     markSeenAll(list);
     if (key) bulkSel[key].clear();

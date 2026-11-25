@@ -69,7 +69,10 @@ LOGIN_PAGE = BASE + "/login.php"
 LOGIN_POST = BASE + "/login_ok.php"
 LIST_URL = BASE + "/mail_list.php"
 READ_URL = BASE + "/mail_read.php"
+MARK_URL = BASE + "/mail_mark.php"          # 읽음/안읽음 표시 (v1.2.28)
 MAIL_LINK = BASE + "/mail_read.php?mb_id=%s&mf_no=%s"
+#  웹메일 편지함 이름 — mail_mark.php 의 mb_id 로 그대로 넘어간다
+MARK_BOXES = ("inbox", "sent")
 
 # 사내 주소록(조직도 + 개인주소록) 화면 — 로그인 세션으로 그대로 긁는다
 #   address_group.php : 부서 그룹 트리(JS TreeNode) — 각 그룹의 그룹번호(mg_no/adg_no)와 이름
@@ -675,6 +678,10 @@ class Nmail:
         self.user, self.password, self.ip_check = user, password, ip_check
         self.timeout, self.debug_dir = timeout, debug_dir
         self.s = requests.Session()
+        # v1.2.28 — 원문 '안 읽음' 보존용 기록
+        #   unread_seen: 목록에서 '안 읽음'으로 확인한 메일  / read_unread: 그중 이번에 본문을 읽은 메일
+        self.unread_seen: dict[str, set[int]] = {}
+        self.read_unread: dict[str, set[int]] = {}
         self.s.headers.update({
             "User-Agent": UA,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -905,7 +912,9 @@ class Nmail:
         self._dump(f"list_{box}_s{s_date}_p{page}.html", r.text)
         if "login.php?back_url" in r.text:
             raise NmailError("목록 요청이 로그인 화면으로 돌아갔습니다 (세션 만료)")
-        return parse_list(r.text, box)
+        rows = parse_list(r.text, box)
+        self._note_list(box, rows)      # v1.2.28 — '안 읽음'이던 메일을 기억해 두었다가 읽은 뒤 되돌린다
+        return rows
 
     def list_mailbox(self, box: str, *, pages: int = 3, page_size: int = 100, stop_below: int = 0) -> list[dict]:
         """받은/보낸편지함 목록을 최신순으로 pages 페이지까지 읽는다.
@@ -930,8 +939,87 @@ class Nmail:
             uniq.append(row)
         return uniq
 
+    # -- 읽음/안읽음 (v1.2.28) -------------------------------------------
+    #  수집은 본문을 얻으려고 mail_read.php 를 열기 때문에 웹메일이 그 메일을 '읽음'으로 바꾼다.
+    #  사용자 요청(#10347 → #10483): 보드로 넘어오는 것만으로 원문이 읽히면 안 되고,
+    #  보드에서 '✓ 확인'을 누른 메일만 원문도 '읽음'이 되어야 한다.
+    #   · 수집: 목록에서 '안 읽음'이던 메일은 본문을 읽은 직후 다시 '안 읽음'으로 되돌린다(restore_unread).
+    #   · 확인: 포털이 '✓ 확인' 때 mark_mails_read 로 '읽음'을 표시한다(server.py /api/mail/mark-read).
+    def _note_list(self, box: str, rows: list[dict]) -> None:
+        for row in rows or []:
+            if not row.get("unread"):
+                continue
+            try:
+                mf = int(row.get("mf_no"))
+            except (TypeError, ValueError):
+                continue
+            self.unread_seen.setdefault(box, set()).add(mf)
+
+    def note_unread(self, box: str, mf_no: Any) -> None:
+        """이미 '안 읽음'으로 알고 있는 메일을 읽기 전에 등록한다(목록을 다시 열지 않는 경로용)."""
+        try:
+            mf = int(mf_no)
+        except (TypeError, ValueError):
+            return
+        self.unread_seen.setdefault(box, set()).add(mf)
+
+    def mark_mails(self, box: str, mf_nos: Any, mode: str = "READ") -> bool:
+        """mail_mark.php 로 여러 통을 한 번에 '읽음'/'안 읽음' 처리한다(실패는 기록만).
+
+        실제 웹메일 화면(mail_list.ko.js)과 같은 방식 — POST 로 `cmf[]` 를 보낸다.
+        네트워크·서버 오류로 수집 전체가 멈추지 않도록 예외를 삼키고 False 를 돌려준다.
+        """
+        mode = str(mode or "").upper()
+        if mode not in ("READ", "UNREAD") or box not in MARK_BOXES:
+            return False
+        ids: list[str] = []
+        for n in (mf_nos or []):
+            s = str(n).strip()
+            if s.isdigit() and s not in ids:
+                ids.append(s)
+        if not ids:
+            return False                       # 빈 목록이면 호출하지 않는다
+        url = f"{MARK_URL}?mode={mode}&mb_id={box}"
+        try:
+            r = self.s.post(url, data=[("cmf[]", n) for n in ids], timeout=self.timeout,
+                            headers={"Referer": f"{LIST_URL}?mb_id={box}"})
+        except requests.RequestException as e:
+            print(f"  ! 웹메일 {mode} 표시 실패({box} {len(ids)}건): {type(e).__name__}", file=sys.stderr)
+            return False
+        code = int(getattr(r, "status_code", 0) or 0)
+        if code not in (200, 302):
+            print(f"  ! 웹메일 {mode} 표시 응답 {code} ({box} {len(ids)}건)", file=sys.stderr)
+            return False
+        return True
+
+    def mark_mails_read(self, box: str, mf_nos: Any) -> bool:
+        return self.mark_mails(box, mf_nos, "READ")
+
+    def mark_mails_unread(self, box: str, mf_nos: Any) -> bool:
+        return self.mark_mails(box, mf_nos, "UNREAD")
+
+    def restore_unread(self) -> int:
+        """이번 수집에서 본문을 읽었지만 원래 '안 읽음'이던 메일을 되돌린다 → 되돌린 건수."""
+        done = 0
+        for box, mfs in list(self.read_unread.items()):
+            ids = sorted(mfs)
+            if not ids:
+                self.read_unread[box] = set()
+                continue
+            if self.mark_mails_unread(box, ids):
+                done += len(ids)
+                self.read_unread[box] = set()
+        return done
+
     # -- 본문 ------------------------------------------------------------
     def read_mail(self, box: str, mf_no: int) -> dict:
+        try:
+            mf = int(mf_no)
+        except (TypeError, ValueError):
+            mf = 0
+        if mf and mf in self.unread_seen.get(box, ()):
+            # 편지읽기 화면이 웹메일에서 '읽음'으로 바꾼다 → 수집이 끝나면 되돌린다
+            self.read_unread.setdefault(box, set()).add(mf)
         r = self._get(READ_URL + f"?mb_id={box}&mf_no={mf_no}")
         self._dump(f"read_{box}_{mf_no}.html", r.text)
         detail = parse_read(r.text)
@@ -4345,6 +4433,9 @@ def build_item(mail: dict, analysis: dict, contacts: dict[str, dict], now: dt.da
         "priorityReason": "",
         "mailbox": mail.get("box", "inbox"),
         "archived": False,
+        # v1.2.28 — 원문 웹메일의 '안 읽음' 상태(목록에서 읽어 온 값). 보드에서 '✓ 확인'을
+        #   누르면 서버가 원문을 '읽음'으로 바꾸고 이 값도 False 로 내린다.
+        "unread": bool(mail.get("unread")),
     }
     if mail.get("attachments"):
         item["attachments"] = mail["attachments"]
@@ -4470,6 +4561,9 @@ def merge_into_thread(item: dict, new_item: dict) -> None:
     entry = dict(new_item["thread"][0])
     item.setdefault("thread", []).append(entry)
     item["thread"] = dedup_thread(item["thread"])
+    # v1.2.28 — 이번에 새로 온 메일의 '안 읽음' 상태를 앞면에 반영한다
+    if "unread" in new_item:
+        item["unread"] = bool(new_item.get("unread"))
     item["lastAt"] = max([str(m.get("date") or "") for m in item["thread"]] + [item.get("receivedAt") or ""])[:16]
     # v1.2.14 — 최신 메일이 나를 수신(To)으로 지정했으면 항목의 수신 구분도 따라 올린다
     #           (옛 코드는 등급만 올려 ‘수신인(To)’ 배지와 등급이 어긋났다)
@@ -4537,6 +4631,8 @@ def refresh_attachment_meta(nm, items: list[dict], *, limit: int = 4) -> int:
     fixed = 0
     for _when, mf_no, it in cands[:limit]:
         box = it.get("mailbox") or "inbox"
+        if it.get("unread"):      # v1.2.28 — 원문이 '안 읽음'이던 메일은 다시 읽은 뒤 되돌린다
+            nm.note_unread(box, mf_no)
         try:
             detail = nm.read_mail(box, mf_no)
         except Exception:  # noqa: BLE001 - 한 건 실패가 동기화를 막지 않는다
@@ -4659,6 +4755,8 @@ def retry_ai_pending(gem, nm, items: list[dict] | None, contacts: dict | None,
         }
         if it.get("attachmentText"):
             mail["attachmentText"] = it["attachmentText"]
+        if it.get("unread"):          # v1.2.28 — 다시 읽어도 원문은 '안 읽음'으로 남긴다
+            nm.note_unread(box, mf_no)
         try:      # 보드 본문은 2,500자만 남으므로 원문을 다시 읽어 온다(실패하면 저장분으로)
             fresh = nm.read_mail(box, int(mf_no))
             if str(fresh.get("bodyText") or "").strip():
@@ -4761,10 +4859,21 @@ def sync(args: argparse.Namespace) -> dict:
     if ai_retried:
         report["aiRetried"] = ai_retried
 
+    def restore_unread() -> None:
+        """v1.2.28 — 본문을 읽으며 '읽음'이 된 반편지함 메일을 원래 '안 읽음'으로 되돌린다."""
+        try:
+            n = nm.restore_unread()
+        except Exception as e:  # noqa: BLE001 - 되돌리기 실패가 동기화 결과를 막지 않는다
+            print(f"  ! 원문 '안 읽음' 복원 실패: {type(e).__name__}", file=sys.stderr)
+            return
+        if n:
+            report["unreadRestored"] = n
+
     if (not inbox and not sent and not is_new and not contacts_added
             and not drafts_refreshed and not to_repaired and not hist_merged and not att_cleaned
             and not ai_retried):
         report["changed"] = False
+        restore_unread()
         return report
 
     def analyze(mail: dict, kind: str) -> dict:
@@ -4777,6 +4886,8 @@ def sync(args: argparse.Namespace) -> dict:
     staged = []
     for row in inbox:
         detail = nm.read_mail("inbox", row["mf_no"])
+        # v1.2.28 — 목록에서 읽어 온 원문 '안 읽음' 상태를 항목에 남긴다
+        detail["unread"] = bool(row.get("unread"))
         if not detail.get("subject"):
             detail["subject"] = row["subject"]
         staged.append((int(prefilter(detail, contacts).get("priority") or 2), row, detail))
@@ -4802,6 +4913,7 @@ def sync(args: argparse.Namespace) -> dict:
         if not args.track_replies:
             break
         detail = nm.read_mail("sent", row["mf_no"])
+        detail["unread"] = False          # 보낸편지함은 '안 읽음' 개념이 없다
         if not detail.get("subject"):
             detail["subject"] = row["subject"]
         analysis = analyze(detail, "보낸편지함")
@@ -4828,6 +4940,7 @@ def sync(args: argparse.Namespace) -> dict:
     if is_new:
         changed = True      # 첫 실행이면 메일이 0건이어도 보드를 만든다(페이지가 열리도록)
     report["changed"] = changed
+    restore_unread()
     if not changed:
         return report
 
@@ -4859,6 +4972,7 @@ def sync(args: argparse.Namespace) -> dict:
     data["items"] = items
 
     if args.dry_run:
+        restore_unread()
         report["written"] = None
         return report
 

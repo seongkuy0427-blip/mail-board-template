@@ -71,7 +71,7 @@ import backfill_archive as bfa  # noqa: E402  (scripts/backfill_archive.py — �
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
 
-VERSION = "1.2.27"
+VERSION = "1.2.28"
 APP_NAME = "CHUNIL Smart Mail Portal"
 KST = dt.timezone(dt.timedelta(hours=9))
 COOKIE_NAME = "chunil_portal"
@@ -1126,6 +1126,17 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
                                           board["thread_cache"], report)
                       if gem is not None else 0)
 
+        def restore_unread() -> int:
+            """v1.2.28 — 본문을 읽으며 '읽음'이 된 반편지함 메일을 원래 '안 읽음'으로 되돌린다."""
+            try:
+                n = nm.restore_unread()
+            except Exception as e:  # noqa: BLE001 - 되돌리기 실패가 동기화를 막지 않는다
+                print(f"[sync] {uid} 원문 '안 읽음' 복원 실패: {type(e).__name__}", file=sys.stderr)
+                return 0
+            if n:
+                print(f"[sync] {uid} 원문 '안 읽음' 복원 {n}건", flush=True)
+            return n
+
         if not inbox and not sent and not first:
             try:      # 새 메일이 없어도 예전 요약·답장 초안은 한 번 정리한다 (v1.2.7 · v1.2.8)
                 fixed = sm.refresh_copied_summaries(board["items"], contacts)
@@ -1141,6 +1152,7 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             if ai_retried:
                 atomic_write_json(board_path, board, mode=0o600)
                 print(f"[sync] {uid} aiPending 재분석 {ai_retried}건 채움", flush=True)
+            restore_unread()
             set_status(uid, state="ready", phase="done", progress=100,
                        message=("새 메일 없음 — 최신 상태입니다" if not ai_retried
                                 else f"새 메일 없음 · AI 재분석 {ai_retried}건 반영"),
@@ -1171,6 +1183,8 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         staged = []
         for row in inbox:
             detail = nm.read_mail("inbox", row["mf_no"])
+            # v1.2.28 — 목록에서 읽어 온 원문 '안 읽음' 상태를 항목에 남긴다
+            detail["unread"] = bool(row.get("unread"))
             if not detail.get("subject"):
                 detail["subject"] = row["subject"]
             staged.append((int(sm.prefilter(detail, contacts).get("priority") or 2), row, detail))
@@ -1193,6 +1207,7 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
         replied = 0
         for row in sent:
             detail = nm.read_mail("sent", row["mf_no"])
+            detail["unread"] = False      # 보낸편지함은 '안 읽음' 개념이 없다
             if not detail.get("subject"):
                 detail["subject"] = row["subject"]
             title_sent.append(str(detail.get("subject") or "") + "\n" + str(detail.get("bodyText") or ""))
@@ -1223,6 +1238,7 @@ def run_sync(uid: str, *, reason: str = "auto", force_contacts: bool = False) ->
             update_user_meta(uid, owner=owner_box)
             print(f"[sync] {uid} 직급 자동 추론 — {sm.OWNER.get('name')} {sm.OWNER.get('title')}", flush=True)
         set_status(uid, phase="save", progress=97, message="보드를 저장하는 중…")
+        restore_unread()
         stamp_hm = now.strftime("%Y-%m-%d %H:%M")
         board["updatedAt"] = f"{stamp_hm} (KST)"
         crit = board.setdefault("criteria", {})
@@ -1639,6 +1655,13 @@ def mail_analyze(uid: str, mail_id: str, *, force: bool = False) -> dict:
                 fetcher = NMAIL_CLASS(uid, pw, ip_check=str(CFG["ip_check"]))
                 fetcher.login()
                 fresh = fetcher.read_mail(item.get("mailbox") or "inbox", mail["mf_no"])
+                # v1.2.28 — 원문이 '안 읽음'이던 메일은 다시 읽은 직후 되돌려 둔다
+                #   (수집이 지켜 둔 '안 읽음'을 AI 재분석이 깨지 않게)
+                if item.get("unread"):
+                    try:
+                        fetcher.mark_mails_unread(item.get("mailbox") or "inbox", [mail["mf_no"]])
+                    except Exception:  # noqa: BLE001 - 되돌리기 실패는 분석을 막지 않는다
+                        pass
                 # v1.2.22 — 보드에는 본문을 2,500자만 남긴다. 다시 분석은 배경·인용 스레드까지 봐야 하므로
                 #   원문을 다시 읽어 왔으면 그 본문(전체)을 쓴다(프롬프트 상한 10,000자는 analysis_body 가 자른다).
                 if str(fresh.get("bodyText") or "").strip():
@@ -1677,6 +1700,77 @@ def mail_analyze(uid: str, mail_id: str, *, force: bool = False) -> dict:
     print(f"[analyze] {uid} {mail_id} 정밀 분석 완료 — Gemini {stats.get('gemini_calls', 0)}회", flush=True)
     return {"ok": True, "cached": False, "id": mail_id, "analysis": analysis_fields(item),
             "model": CFG["gemini_model"], "at": item["analyzedAt"]}
+
+
+# ────────────────────────────────────────────────────────────── ✅ 확인 → 원문 '읽음' (v1.2.28)
+#  사용자 요청(#10347 → #10483): 수집이 원문의 '안 읽음'을 건드리지 않게 바꿨으므로,
+#  보드에서 '✓ 확인'을 누른 메일만 원문 웹메일을 '읽음'으로 바꾼다(보기만 한 메일은 그대로).
+MARK_BOXES = ("inbox", "sent")
+
+
+def mark_mail_read(uid: str, body: dict | None = None) -> dict:
+    """메일 1통을 원문 웹메일에 '읽음'으로 표시한다.
+
+    body: {"id": "m-5418641", "mf_no": 5418641, "box": "inbox"} — id 만 있어도 되고,
+          box 를 비우면 보드 항목의 mailbox 를 따른다.
+    실패해도 보드 조작(확인 처리)은 그대로 두고 결과만 돌려준다.
+    """
+    body = body or {}
+    mail_id = str(body.get("id") or "").strip()
+    mf_no: int | None = None
+    raw = body.get("mf_no")
+    if raw not in (None, ""):
+        try:
+            mf_no = int(str(raw).strip())
+        except (TypeError, ValueError):
+            mf_no = None
+    if mf_no is None:
+        m = re.fullmatch(r"m-(\d+)", mail_id)
+        if m:
+            mf_no = int(m.group(1))
+    if mf_no is None:
+        return {"ok": False, "code": "bad_request", "message": "메일 번호(mf_no)를 확인할 수 없습니다."}
+
+    path = user_path(uid, "board.json")
+    board = read_json(path, None)
+    items = (board or {}).get("items") if isinstance(board, dict) else None
+    item = next((it for it in (items or [])
+                 if isinstance(it, dict) and str(it.get("id")) == (mail_id or f"m-{mf_no}")), None)
+    box = str(body.get("box") or "").strip().lower()
+    if box not in MARK_BOXES:
+        box = str((item or {}).get("mailbox") or "inbox").strip().lower()
+    if box not in MARK_BOXES:
+        box = "inbox"
+
+    try:
+        nm = attachment_session(uid)      # 10분 재사용 — 확인 누를 때마다 로그인하지 않는다
+    except PermissionError:
+        return {"ok": False, "code": "no_cred", "id": mail_id, "mf_no": mf_no, "box": box,
+                "message": "저장된 웹메일 비밀번호가 없습니다 — 다시 로그인해 주세요."}
+    except Exception as e:  # noqa: BLE001 - 웹메일 오류를 화면 오류로 번지지 않게
+        print(f"[mark-read] {uid} 로그인 실패: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+        return {"ok": False, "code": "upstream", "id": mail_id, "mf_no": mf_no, "box": box,
+                "message": "웹메일 연결에 실패했습니다."}
+
+    ok = False
+    try:
+        ok = bool(nm.mark_mails_read(box, [mf_no]))
+    except Exception as e:  # noqa: BLE001
+        print(f"[mark-read] {uid} {mail_id} 실패: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+    if not ok:
+        with ATTACH_LOCK:                  # 세션이 만료됐을 수 있으니 다음 번에는 새로 로그인한다
+            ATTACH_CACHE.pop(uid, None)
+        return {"ok": False, "code": "upstream", "id": mail_id, "mf_no": mf_no, "box": box,
+                "message": "원문 웹메일에 '읽음'을 표시하지 못했습니다."}
+
+    if item is not None and item.get("unread"):
+        item["unread"] = False          # 다음 수집 전에도 화면·검색이 같은 상태를 보게
+        try:
+            atomic_write_json(path, board, mode=0o600)
+        except OSError as e:
+            print(f"[mark-read] {uid} 보드 저장 실패: {e}", file=sys.stderr)
+    print(f"[mark-read] {uid} {mail_id} → 원문 읽음({box})", flush=True)
+    return {"ok": True, "id": mail_id, "mf_no": mf_no, "box": box}
 
 
 # ────────────────────────────────────────────────────────────── 백그라운드 워커
@@ -2366,6 +2460,9 @@ class PortalHandler(BaseHTTPRequestHandler):
             if path == "/api/mail/analyze":
                 self._api_mail_analyze()
                 return
+            if path == "/api/mail/mark-read":
+                self._api_mail_mark_read()
+                return
             if path == "/api/state":
                 uid = self._require_user()
                 if not uid:
@@ -2594,6 +2691,29 @@ class PortalHandler(BaseHTTPRequestHandler):
                     "bad_request": HTTPStatus.BAD_REQUEST,
                     "no_key": HTTPStatus.NOT_IMPLEMENTED,
                     "no_board": HTTPStatus.CONFLICT}.get(str(result.get("code")), HTTPStatus.BAD_REQUEST)
+        self._json(code, result)
+
+    def _api_mail_mark_read(self) -> None:
+        """✅ 확인 → 원문 웹메일 '읽음' (v1.2.28).
+
+        body: {"id": "m-…", "mf_no": 5418641, "box": "inbox"}
+        수집은 원문의 '안 읽음'을 그대로 두므로, 사용자가 확인한 메일만 여기서 읽음이 된다.
+        웹메일 오류·자격증명 없음도 서버가 죽지 않고 {"ok": false, ...} 로 돌려준다.
+        """
+        uid = self._require_user()
+        if not uid:
+            return
+        try:
+            body = self._body_json(limit=8192)
+        except ValueError:
+            self._err(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "요청이 너무 큽니다")
+            return
+        result = mark_mail_read(uid, body)
+        code = HTTPStatus.OK
+        if not result.get("ok"):
+            code = {"bad_request": HTTPStatus.BAD_REQUEST,
+                    "no_cred": HTTPStatus.CONFLICT,
+                    "upstream": HTTPStatus.BAD_GATEWAY}.get(str(result.get("code")), HTTPStatus.BAD_GATEWAY)
         self._json(code, result)
 
     def _api_lock(self, uid: str) -> None:
