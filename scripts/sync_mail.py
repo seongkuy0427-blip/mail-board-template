@@ -990,6 +990,11 @@ class Nmail:
         if code not in (200, 302):
             print(f"  ! 웹메일 {mode} 표시 응답 {code} ({box} {len(ids)}건)", file=sys.stderr)
             return False
+        text = str(getattr(r, "text", "") or "")
+        if "login.php?back_url" in text or 'name="m_pwd"' in text:
+            # 세션이 만료되면 웹메일이 로그인 화면(200)으로 돌려준다 — 성공으로 착각하지 않는다
+            print(f"  ! 웹메일 {mode} 표시 실패 — 로그인 세션 만료({box} {len(ids)}건)", file=sys.stderr)
+            return False
         return True
 
     def mark_mails_read(self, box: str, mf_nos: Any) -> bool:
