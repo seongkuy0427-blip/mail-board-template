@@ -396,8 +396,6 @@
   .day .ev{font-size:9.5px; line-height:1.3; color:var(--ink-2); background:#f4f4f5; border-radius:4px; padding:0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .day .ev.urgent{background:var(--red-weak); color:#b02a30}
   .day .dotrow{display:none}
-  .cal-legend{display:flex; gap:10px; margin-top:7px; font-size:10px; color:var(--ink-3); flex-wrap:wrap}
-  .cal-legend i{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px; vertical-align:0}
   .side-h{font-size:11.5px; font-weight:600; color:var(--ink-2); display:flex; align-items:center; gap:5px; margin:0 0 7px}
   .side-h .n{font-weight:500; color:var(--ink-3); font-size:10.5px}
   .side-list{display:flex; flex-direction:column; gap:6px; margin-bottom:11px}
@@ -658,6 +656,18 @@
   .banner{display:flex; gap:8px; align-items:flex-start; padding:9px 11px; border-radius:9px; background:#fff;
     border:1px solid var(--line); font-size:11.8px; color:var(--ink-2); line-height:1.55; margin:0 0 8px}
   .banner b{color:var(--ink)}
+  /* ✨ v1.2.23 — 탭 설명 띠 오른쪽 끝 ✕ 닫기 · 탭 줄 끝 ? 복원 버튼 */
+  .banner{padding-right:6px}
+  .banner-x{flex:none; margin-left:auto; align-self:flex-start; width:20px; height:20px; padding:0; border:0;
+    border-radius:5px; background:transparent; color:var(--ink-3); font-family:inherit; font-size:12px;
+    line-height:20px; cursor:pointer; -webkit-tap-highlight-color:transparent}
+  .banner-x:hover{background:#f1f1f3; color:var(--ink)}
+  .seg button.seg-guide{flex:none; margin-left:auto; align-self:center; width:18px; height:18px; padding:0;
+    margin-bottom:0; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--ink-3);
+    font-family:inherit; font-size:10.5px; font-weight:700; line-height:1; justify-content:center}
+  .seg button.seg-guide:hover{color:var(--ink); border-color:#d4d4d8; background:#fafafa}
+  .chip.more{border-style:dashed; color:var(--ink-3); font-weight:600; background:transparent}
+  .chip.more:hover{color:var(--ink); border-color:#d4d4d8; background:#fafafa}
   .empty{text-align:center; color:var(--ink-3); font-size:12.5px; padding:44px 14px; background:var(--card); border:1px dashed var(--line); border-radius:10px; line-height:1.7}
 
   /* ---------- 상세 드로어 / 시트 ---------- */
@@ -1356,6 +1366,7 @@
 
     /* ---- 칩 · 툴바 ---- */
     .chip{padding:5px 8px; font-size:10.8px}
+    .seg button.seg-guide{width:17px; height:17px; margin-left:4px}
     .group-toggle{padding:5px 8px; font-size:10.5px}
     .rank-note{font-size:10px; line-height:1.5}
     .toolbar{gap:5px; margin-bottom:7px}
@@ -1417,7 +1428,6 @@
     .day .dn{font-size:9.6px; gap:2px}
     .day .dn .cnt{font-size:8px; padding:0 4px}
     .day .dotrow{gap:1.5px}
-    .cal-legend{font-size:9.4px; gap:8px}
     .side-card .sc-t{font-size:11.4px}
     .cus-acts{gap:4px}
     .cus-acts .ca{font-size:10.6px; padding:4px 7px}
@@ -1602,7 +1612,7 @@
       </div>
     </div>
     <div class="wrap hd-sub">
-      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.22</span>
+      <span class="ver-badge" id="verBadge" title="현재 화면 버전">v1.2.23</span>
       <button type="button" class="wx-chip" id="wxBar" aria-expanded="false" aria-controls="wxBody" title="눌러서 시간별·7일 예보 보기">
         <span class="wx-ico">🌤️</span><span class="wx-loc">인천 부평</span><span class="wx-t" id="wxTemp">—</span>
         <span class="wx-al" id="wxAlert"></span>
@@ -1648,11 +1658,6 @@
           </div>
           <div class="dow" id="calDow"></div>
           <div class="days" id="calDays"></div>
-          <div class="cal-legend">
-            <span><i style="background:#5e6ad2"></i>내가 등록한 메일</span>
-            <span><i style="background:#e5484d"></i>긴급</span>
-            <span><i style="background:#09090b"></i>오늘</span>
-          </div>
         </div>
         <div class="cal-side">
           <div class="side-h">🗓️ <span id="calSideTitle">선택한 날짜</span> <span class="n" id="calSideN"></span></div>
@@ -1838,7 +1843,7 @@
 
   /* 🏷️ 화면 버전 — 포털 모드는 서버가 <head>에 넣어 준 window.__PORTAL_VERSION__ 이 우선,
      GitHub Pages(정적) 사본은 이 파일의 버전을 쓴다. */
-  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.22").replace(/^v/i, "");
+  const APP_VER = String(window.__PORTAL_VERSION__ || "1.2.23").replace(/^v/i, "");
   (function paintVer() {
     const b = document.getElementById("verBadge");
     if (!b) return;
@@ -1892,7 +1897,7 @@
   let ENC = null, DATA = null, PIN = null;
   let lastSyncAt = 0;
   let STORE = loadState();
-  let view = { tab: "p1", q: "", sort: "recent", day: null, ym: null, sender: "all", group: false, replyOnly: false, showDone: false, openId: null, calOpen: false, cusId: null, cusInbox: true, cusSent: true, kpi: "" };
+  let view = { tab: "p1", q: "", sort: "recent", day: null, ym: null, sender: "all", senderMore: false, group: false, replyOnly: false, showDone: false, openId: null, calOpen: false, cusId: null, cusInbox: true, cusSent: true, kpi: "" };
   let RKP = { id: null, mode: "sender", kw: "" };   /* 🏷️ 목록 행 분류 드롭다운 상태 (v1.2.14) */
 try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
 
@@ -2827,14 +2832,82 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   }
   function senderKey(it) { return it.senderName || it.sender || "기타"; }
   function senderLabel(it) { return it.vipLabel || senderKey(it); }
+
+  /* ✨ v1.2.23 — 발신자 칩 ‘한 사람으로 묶기’.
+     같은 사람이 ‘변요환 대리’ · ‘변요환 사원’ · ‘변요환’처럼 직급 표기 차이로 칩이 여러 개로
+     갈리던 문제. 이름에서 직급을 떼어 낸 값 하나를 묶는 키로 쓰고(이름 칸이 비고 메일 주소만
+     있는 발신자는 주소록에서 이름을 찾아 붙인다), 칩을 눌렀을 때 거르는 기준도 같은 키다.
+     표시명은 직급이 붙은 표기(‘변요환 대리’)를 우선하고, 등급 라벨(1-1 최우선 …)이 있는
+     메일은 지금처럼 그 라벨을 쓴다. */
+  const SENDER_TITLES = ["대표이사", "부사장", "전무이사", "상무이사", "상무", "전무", "이사", "본부장", "사업부장",
+    "센터장", "팀장", "실장", "소장", "원장", "부장", "차장", "과장", "대리", "주임", "사원", "매니저", "선임",
+    "책임", "수석", "연구원", "기사", "주무관", "사무관", "서기관", "계장", "조장", "반장", "대표", "회장", "사장"];
+  const SENDER_TITLE_RE = new RegExp("\\s*(?:" + SENDER_TITLES.join("|") + ")\\s*$");
+  let SENDER_EMAIL_NAMES = null, SENDER_EMAIL_NAMES_N = -1;
+  function senderNameByEmail(email) {
+    if (!email) return "";
+    let n = -1;
+    try { n = addressBook().length; } catch (e) { n = -1; }
+    if (!SENDER_EMAIL_NAMES || SENDER_EMAIL_NAMES_N !== n) {
+      SENDER_EMAIL_NAMES = {}; SENDER_EMAIL_NAMES_N = n;
+      try {
+        addressBook().forEach((c) => {
+          const e = String(c.email || "").toLowerCase();
+          if (e && c.name) SENDER_EMAIL_NAMES[e] = c.name;
+        });
+      } catch (e) {}
+    }
+    return SENDER_EMAIL_NAMES[email] || "";
+  }
+  function senderStripTitle(s) {
+    let n = String(s || "").replace(/\s+/g, " ").trim();
+    for (let i = 0; i < 2; i++) n = n.replace(SENDER_TITLE_RE, "").replace(/\s*님$/, "").trim();
+    return n;
+  }
+  function senderBase(it) {
+    const email = String(it.senderEmail || "").trim().toLowerCase();
+    const raw = String(it.senderName || it.sender || "").replace(/\s+/g, " ").trim();
+    let n = raw;
+    if (!n || n.toLowerCase() === email) n = senderNameByEmail(email) || raw;
+    return senderStripTitle(n) || raw || "기타";
+  }
+  /* 칩을 묶는 키 — 같은 사람의 여러 표기가 같은 값을 낸다 */
+  function senderGroupKey(it) { return senderBase(it); }
+
   function senderGroups(list) {
     const map = new Map();
     list.forEach((it) => {
-      const k = senderKey(it);
-      if (!map.has(k)) map.set(k, { key: k, label: senderLabel(it), vipRank: 99, items: [] });
+      const k = senderGroupKey(it);
+      if (!map.has(k)) map.set(k, { key: k, forms: new Map(), vips: new Map(), vipRank: 99, items: [] });
       const g = map.get(k); g.items.push(it);
+      const f = String(it.senderName || it.sender || "기타");
+      g.forms.set(f, (g.forms.get(f) || 0) + 1);
+      if (it.vipLabel) g.vips.set(it.vipLabel, (g.vips.get(it.vipLabel) || 0) + 1);
       const r = rank(it); if (r < g.vipRank) g.vipRank = r;
-      if (it.vipLabel) g.label = it.vipLabel;
+    });
+    /* 표기 고르기 — ① 직급이 붙은 표기 ② 메일 주소가 아닌 이름 ③ 그래도 없으면 주소.
+       그 안에서는 많이 쓴 표기 → 긴 표기 순. */
+    const formTier = (k) => {
+      const email = String(k).indexOf("@") >= 0;
+      if (email) return 0;
+      return senderStripTitle(k) !== String(k).replace(/\s+/g, " ").trim() ? 2 : 1;
+    };
+    const pick = (m) => {
+      let best = "", bt = -1, bn = -1;
+      m.forEach((n, k) => {
+        const t = formTier(k);
+        if (t > bt || (t === bt && (n > bn || (n === bn && k.length > best.length)))) { best = k; bt = t; bn = n; }
+      });
+      return best;
+    };
+    map.forEach((g) => {
+      /* 등급 라벨(1-2 주요 · 1-1 최우선)은 그 묶음이 ‘과반 등급 라벨’일 때만 쓴다 — 상사 메일이
+         화면에 실명으로 크게 뜨지 않게 한 기존 규칙(배지·필터는 중립 등급명)을 지키면서,
+         일반 동료는 ‘변요환 대리’처럼 이름으로 보이게 한다. */
+      const vipN = g.items.filter((it) => !!it.vipLabel).length;
+      const useVip = vipN * 2 > g.items.length;
+      g.label = (useVip ? pick(g.vips) : "") || pick(g.forms) || pick(g.vips) || "기타";
+      delete g.forms; delete g.vips;
     });
     return Array.from(map.values()).sort((a, b) => a.vipRank - b.vipRank || b.items.length - a.items.length || a.label.localeCompare(b.label));
   }
@@ -4188,7 +4261,21 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       (view.calOpen ? " · 오늘 <b>" + nToday + "건</b>" : " · 눌러서 펼치기");
   }
 
-  /* ---------------- 렌더: 탭 · 칩 ---------------- */
+  /* ---------------- 렌더: 탭 · 칩 ----------------
+     ✨ v1.2.23 — 탭 설명 띠 ✕ 닫기. 한 번 닫으면 LSK(mb_guide_hide_v1)에 저장해 모든 탭에서
+     사라지고 새로고침·탭 전환 뒤에도 유지된다. 탭 줄 끝의 작은 ? 로 다시 켠다. */
+  function guideHidden() { try { return LSK.getItem("mb_guide_hide_v1") === "1"; } catch (e) { return false; } }
+  function guideSet(hide) {
+    try { LSK.setItem("mb_guide_hide_v1", hide ? "1" : "0"); } catch (e) {}
+    renderSeg(); renderList();
+  }
+  function guideX() {
+    return '<button type="button" class="banner-x" data-guide-close="1" title="설명 띠 닫기 — 모든 탭에서 함께 숨겨집니다" aria-label="탭 설명 띠 닫기">✕</button>';
+  }
+  function guideToggleBtn() {
+    const t = guideHidden() ? "탭 설명 띠 다시 보기" : "탭 설명 띠 숨기기";
+    return '<button type="button" class="seg-guide" data-guide-toggle="1" title="' + t + '" aria-label="' + t + '">?</button>';
+  }
   function renderSeg() {
     const rows = [["p1", "🔴 즉시 확인", p1Items()], ["p2", "🟡 흐름 참고", p2Items()], ["p3", "⚪ 기록 보관", p3Items()],
       ["fu", "⏳ 미회신 추적", null], ["pin", "📌 고정", pinnedItems()]];
@@ -4200,7 +4287,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
         '<span class="n">' + n + '</span>' +
         (nn ? '<span class="newb" data-clear-new="' + k + '" title="이 탭의 NEW 표시를 모두 지우기 (메일은 그대로)">NEW' + (nn > 1 ? " " + nn : "") + '</span>' : "") +
         "</button>";
-    }).join("");
+    }).join("") + guideToggleBtn();
     paintNewClear();
     /* ⏳ 미회신 추적 탭에서는 회신 필터·정렬이 의미 없으므로 숨긴다 */
     const isFu = view.tab === "fu";
@@ -4215,10 +4302,25 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     if (view.tab === "p1" || view.tab === "p2") {
       const base = view.tab === "p1" ? p1Items() : p2Items();
       const groups = senderGroups(base);
+      /* ✨ v1.2.23 — 칩이 3줄로 늘어 목록을 밀어내지 않게, 처음엔 8개(좁은 화면 4개)만 보여주고
+         나머지는 [+ N명 더보기]로 접어 둔다. 지금 고른 발신자가 접힌 쪽에 있으면 함께 보인다. */
+      const LIMIT = (typeof innerWidth === "number" && innerWidth < 760) ? 4 : 8;
+      let shown = groups, moreHidden = 0;
+      if (!view.senderMore && groups.length > LIMIT) {
+        shown = groups.slice(0, LIMIT);
+        const cur = groups.find((g) => g.key === view.sender);
+        if (cur && shown.indexOf(cur) < 0) shown = shown.concat([cur]);
+        moreHidden = groups.length - shown.length;
+      }
       let html = '<button class="chip ' + (view.sender === "all" ? "on" : "") + '" data-sender="all">' +
         (view.tab === "p1" ? "전체 즉시 확인" : "전체 흐름 참고") + '<span class="n">' + base.length + "</span></button>";
-      html += groups.map((g) => '<button class="chip ' + (g.vipRank === 1 ? "vip " : "") + (view.sender === g.key ? "on" : "") +
+      html += shown.map((g) => '<button class="chip ' + (g.vipRank === 1 ? "vip " : "") + (view.sender === g.key ? "on" : "") +
         '" data-sender="' + esc(g.key) + '">' + esc(g.label) + '<span class="n">' + g.items.length + "</span></button>").join("");
+      if (groups.length > LIMIT) {
+        html += view.senderMore
+          ? '<button type="button" class="chip more" data-sender-more="0" title="발신자 칩을 다시 접습니다">접기 ▴</button>'
+          : (moreHidden ? '<button type="button" class="chip more" data-sender-more="1" title="발신자 칩을 모두 펼칩니다">+ ' + moreHidden + "명 더보기 ▾</button>" : "");
+      }
       html += '<span class="chip-sep"></span><label class="group-toggle"><input type="checkbox" id="groupChk"' + (view.group ? " checked" : "") + "> 사람별로 묶어보기</label>";
       row.style.display = ""; row.innerHTML = html;
     } else { row.style.display = "none"; row.innerHTML = ""; }
@@ -4371,7 +4473,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       : (view.tab === "p2" ? p2Items()
       : (view.tab === "pin" ? pinnedItems() : p3Items()));
     let list = base.filter(matches);
-    if ((view.tab === "p1" || view.tab === "p2") && view.sender !== "all") list = list.filter((it) => senderKey(it) === view.sender);
+    if ((view.tab === "p1" || view.tab === "p2") && view.sender !== "all") list = list.filter((it) => senderGroupKey(it) === view.sender);
     if (view.replyOnly) list = list.filter((it) => replyOf(it) === "needs_reply");
     /* ✅ 확인으로 완료한 메일은 기본 목록에서 숨김 — 검색어를 입력하거나 '완료 포함'을 켜면 다시 나온다 */
     if (!view.showDone && !view.q.trim()) list = list.filter((it) => !isDone(it));
@@ -4473,7 +4575,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     const list = pinListForView(), total = pinnedItems().length;
     bulkPrune("pin", list.map((it) => it.id));
     const arch = list.filter(isArchived).length, done = list.filter(isDone).length;
-    let html = '<div class="banner" style="border-color:#f0d6b0;background:#fffaf2">📌 <div><b>고정한 메일</b> — <b>📌</b>을 누르면 원래 탭에서 빠져 <b>여기 ‘📌 고정’ 탭으로 옮겨집니다</b>(고정을 풀면 원래 자리로 돌아갑니다). 분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 계속 남고, 행을 누르면 상세가 열립니다.</div></div>';
+    let html = guideHidden() ? "" : '<div class="banner" style="border-color:#f0d6b0;background:#fffaf2">📌 <div><b>고정한 메일</b> — <b>📌</b>을 누르면 원래 탭에서 빠져 <b>여기 ‘📌 고정’ 탭으로 옮겨집니다</b>(고정을 풀면 원래 자리로 돌아갑니다). 분류(🔴·🟡·⚪)·<b>✅ 확인</b>·<b>이전 기록</b>과 상관없이 계속 남고, 행을 누르면 상세가 열립니다.</div>' + guideX() + '</div>';
     html += '<div class="sec-title">📌 고정 <span class="hint">' + list.length + "건" +
       (view.q.trim() ? " · “" + esc(view.q.trim()) + "” 검색" : "") +
       (arch ? " · 이전 기록 " + arch : "") + (done ? " · ✅ 완료 " + done : "") + "</span></div>";
@@ -4540,11 +4642,11 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
       if (main.length) html += bulkBarHtml(main);
       html += main.length ? rowsBlock(main) : '<div class="empty">' + (view.day ? "이 날짜에 마감인 즉시 확인 건이 없습니다." : (view.replyOnly ? "회신이 필요한 즉시 확인 건이 없습니다." : (q && history.length ? "오늘(11/19 이후) 즉시 확인에는 없습니다. 아래 ‘이전 기록’에서 " + history.length + "건 찾았습니다." : "지금은 수신(To)이거나 이름으로 지목된 메일이 없습니다.<br>참조(CC)로 받은 메일은 <b>🟡 흐름 참고</b> 탭에 있습니다."))) + "</div>";
     } else if (view.tab === "p2") {
-      html += '<div class="banner">🟡 <div><b>흐름 참고</b> — 고객사(@gm.com)·MC↔GM 왕복, 사내 결품·PTR·조직 공지처럼 흐름을 알아야 하는 건. 내가 <b>수신(To)</b>도 아니고 이름으로 지목되지도 않은(참조 CC만 받은) 메일이 여기로 옵니다.</div></div>';
+      if (!guideHidden()) html += '<div class="banner">🟡 <div><b>흐름 참고</b> — 고객사(@gm.com)·MC↔GM 왕복, 사내 결품·PTR·조직 공지처럼 흐름을 알아야 하는 건. 내가 <b>수신(To)</b>도 아니고 이름으로 지목되지도 않은(참조 CC만 받은) 메일이 여기로 옵니다.</div>' + guideX() + '</div>';
       if (main.length) html += bulkBarHtml(main);
       html += main.length ? rowsBlock(main) : '<div class="empty">조건에 맞는 흐름 참고 건이 없습니다.</div>';
     } else {
-      html += '<div class="banner">⚪ <div><b>기록 보관</b> — 내가 직접 건 ‘기록 보관’ 규칙(발신자·제목 키워드)에 해당하는 메일. 수신(To)이거나 이름이 지목된 메일은 규칙이 있어도 흐름 참고로 보호됩니다. 평소엔 숨겨 두고 필요할 때만 봅니다.</div></div>';
+      if (!guideHidden()) html += '<div class="banner">⚪ <div><b>기록 보관</b> — 내가 직접 건 ‘기록 보관’ 규칙(발신자·제목 키워드)에 해당하는 메일. 수신(To)이거나 이름이 지목된 메일은 규칙이 있어도 흐름 참고로 보호됩니다. 평소엔 숨겨 두고 필요할 때만 봅니다.</div>' + guideX() + '</div>';
       if (main.length) html += bulkBarHtml(main);
       html += main.length ? rowsBlock(main) : '<div class="empty">조건에 맞는 기록 보관 건이 없습니다.</div>';
     }
@@ -4591,7 +4693,7 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     bulkPrune("fu", shown.map((f) => f.id));
     const pend = shown.filter((f) => !fuDone(f));
     const done = shown.filter(fuDone);
-    let html = '<div class="banner" style="border-color:#f0d9bb;background:#fffaf2">⏳ <div><b>보낸 요청 미회신</b> — 협력사·타 부서·고객사에 답변·자료·승인·조치를 요청했는데 아직 회신이 없는 건입니다. (상사 보고·자료 제출은 제외) 행을 누르면 <b>보낸 원문 → 요청 요약 → 독촉 문구</b>를 보고, 회신이 오면 하단에서 <b>회신 받음(추적 완료)</b>을 누르세요.</div></div>';
+    let html = guideHidden() ? "" : '<div class="banner" style="border-color:#f0d9bb;background:#fffaf2">⏳ <div><b>보낸 요청 미회신</b> — 협력사·타 부서·고객사에 답변·자료·승인·조치를 요청했는데 아직 회신이 없는 건입니다. (상사 보고·자료 제출은 제외) 행을 누르면 <b>보낸 원문 → 요청 요약 → 독촉 문구</b>를 보고, 회신이 오면 하단에서 <b>회신 받음(추적 완료)</b>을 누르세요.</div>' + guideX() + '</div>';
     html += '<div class="sec-title">⏳ 대기 중 <span class="hint">' + pend.length + "건 · 오래된 순</span></div>";
     if (shown.length) html += bulkBarHtml(shown);
     html += pend.length ? '<div class="rows">' + pend.map(fuRowHtml).join("") + "</div>"
@@ -6715,6 +6817,9 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
   });
 
   $("seg").addEventListener("click", (e) => {
+    /* ✨ v1.2.23 — 탭 줄 끝 ? : 설명 띠 다시 보기/숨기기 (모든 탭 공통) */
+    const gb = e.target.closest("[data-guide-toggle]");
+    if (gb) { e.preventDefault(); e.stopPropagation(); guideSet(!guideHidden()); return; }
     /* 탭의 NEW n 배지를 누르면 탭 이동 없이 그 탭의 NEW만 지운다 */
     const cb = e.target.closest("[data-clear-new]");
     if (cb) { e.preventDefault(); e.stopPropagation(); clearNew(cb.dataset.clearNew); return; }
@@ -6723,11 +6828,15 @@ try { view.calOpen = localStorage.getItem(LS.cal) === "1"; } catch (e) {}
     view.tab = b.dataset.tab;
     view.day = null;
     view.sender = "all";
+    view.senderMore = false;
     if (view.tab === "fu") view.replyOnly = false;
     syncTogs(); renderKpi(); renderSeg(); renderCalendar(); mbFadeNext(); renderList();
   });
   $("newClear").addEventListener("click", () => clearNew(view.kpi ? "kpi" : view.tab));
   $("chipRow").addEventListener("click", (e) => {
+    /* ✨ v1.2.23 — [+ N명 더보기 ▾] / [접기 ▴] */
+    const mb = e.target.closest("[data-sender-more]");
+    if (mb) { e.preventDefault(); view.senderMore = mb.dataset.senderMore === "1"; renderChips(); return; }
     const b = e.target.closest("[data-sender]"); if (!b) return;
     view.sender = b.dataset.sender; renderChips(); mbFadeNext(); renderList();
   });
